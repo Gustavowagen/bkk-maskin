@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { NicknameWithLine } from '../types';
+import type { NicknameWithLine, PlayerStack } from '../types';
 
 /**
  * Read an Excel file and return a workbook
@@ -201,6 +201,46 @@ export const filterWorkbookByNicknames = (
   XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, targetSheetName);
 
   return newWorkbook;
+};
+
+/**
+ * Extract every player's nickname + chips from the "Club Member Balance" sheet.
+ * Unlike filterWorkbookByNicknames (which only keeps rows matching user-entered
+ * nicknames), this captures every data row regardless of Role, for syncing a
+ * full roster snapshot to the external Player stacks database.
+ */
+export const extractPlayerStacks = (workbook: XLSX.WorkBook): PlayerStack[] => {
+  const targetSheetName = 'Club Member Balance';
+
+  if (!workbook.SheetNames.includes(targetSheetName)) {
+    throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
+  }
+
+  const worksheet = workbook.Sheets[targetSheetName];
+
+  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: ''
+  });
+
+  // Fixed 5-row header block: Union Name, Union ID, Period, merged category
+  // headers, sub-headers. Real data starts at row 6 (index 5).
+  const dataRows = jsonData.slice(5);
+
+  const players: PlayerStack[] = [];
+
+  dataRows.forEach((row) => {
+    const nickname = row[10] !== undefined ? String(row[10]).trim() : '';
+    const chips = row[11] !== undefined ? Number(row[11]) : NaN;
+
+    // Defensive guard against empty rows or header-like drift in the export format.
+    if (!nickname || nickname === '-' || nickname === 'Nickname') return;
+    if (Number.isNaN(chips)) return;
+
+    players.push({ nickname, chips });
+  });
+
+  return players;
 };
 
 /**
