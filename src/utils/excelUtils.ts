@@ -244,6 +244,34 @@ export const extractPlayerStacks = (workbook: XLSX.WorkBook): PlayerStack[] => {
 };
 
 /**
+ * Fire-and-forget sync of the latest player roster to the external
+ * "Player stacks" Google Sheet via an Apps Script Web App endpoint.
+ * Silent by design: no UI feedback is shown on success or failure,
+ * per the approved player-stacks-sync design doc.
+ */
+export const syncPlayerStacks = async (players: PlayerStack[]): Promise<void> => {
+  const url = import.meta.env.VITE_PLAYER_STACKS_URL as string | undefined;
+
+  if (!url) {
+    console.warn('VITE_PLAYER_STACKS_URL is not set; skipping player stacks sync.');
+    return;
+  }
+
+  try {
+    // text/plain avoids a CORS preflight OPTIONS request, which Apps Script
+    // Web Apps don't handle. The body is still JSON; Apps Script parses it
+    // from e.postData.contents regardless of the declared content type.
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ players })
+    });
+  } catch (error) {
+    console.error('Error syncing player stacks:', error);
+  }
+};
+
+/**
  * Generate and download Excel file with styling
  */
 export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
