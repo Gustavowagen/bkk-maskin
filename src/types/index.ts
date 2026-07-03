@@ -3,6 +3,11 @@ export interface NicknameWithLine {
   line?: number; // Optional line value
 }
 
+export interface PlayerStack {
+  nickname: string;
+  chips: number;
+}
+
 export interface AppState {
   file: File | null;
   workbook: any | null; // XLSX.WorkBook
