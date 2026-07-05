@@ -4,7 +4,7 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile, extractPlayerStacks, syncPlayerStacks } from './utils/excelUtils'
 import type { NicknameWithLine } from './types'
 
 function App() {
@@ -52,6 +52,14 @@ function App() {
     try {
       const wb = await readExcelFile(uploadedFile)
       setWorkbook(wb)
+
+      // Silent, best-effort sync — must never block the upload flow above.
+      try {
+        const players = extractPlayerStacks(wb)
+        syncPlayerStacks(players)
+      } catch (error) {
+        console.error('Error extracting player stacks:', error)
+      }
     } catch (error) {
       console.error('Error reading file:', error)
       alert('Error reading Excel file. Please make sure it is a valid Excel file.')
