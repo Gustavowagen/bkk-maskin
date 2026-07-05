@@ -48,7 +48,8 @@ function getOrCreatePlayerStacksSheet_() {
 
   if (!sheet) {
     sheet = ss.insertSheet('Player stacks');
-    sheet.getRange(1, 1, 1, 3).setValues([['Nickname', 'Chips', 'Active players']]);
+    // Column C is a deliberate blank spacer between Chips and Active players.
+    sheet.getRange(1, 1, 1, 4).setValues([['Nickname', 'Chips', '', 'Active players']]);
   }
 
   return sheet;
@@ -93,14 +94,15 @@ function computeActivePlayers_(oldSnapshot, newPlayers) {
   return active;
 }
 
-// Full replace: clears A2:C down to the old last row, then writes the new
-// roster into A/B and the active list into C. Players missing from
-// newPlayers are simply not written back, which is how they're "removed".
+// Full replace: clears A2:D down to the old last row, then writes the new
+// roster into A/B and the active list into D (column C stays blank as a
+// spacer). Players missing from newPlayers are simply not written back,
+// which is how they're "removed".
 function writeSnapshot_(sheet, newPlayers, activePlayers) {
   const lastRow = sheet.getLastRow();
 
   if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+    sheet.getRange(2, 1, lastRow - 1, 4).clearContent();
   }
 
   if (newPlayers.length > 0) {
@@ -110,6 +112,6 @@ function writeSnapshot_(sheet, newPlayers, activePlayers) {
 
   if (activePlayers.length > 0) {
     const activeRows = activePlayers.map((n) => [n]);
-    sheet.getRange(2, 3, activeRows.length, 1).setValues(activeRows);
+    sheet.getRange(2, 4, activeRows.length, 1).setValues(activeRows);
   }
 }

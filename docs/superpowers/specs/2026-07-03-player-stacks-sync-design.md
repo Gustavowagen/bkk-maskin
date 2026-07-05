@@ -26,8 +26,8 @@ handleFileUpload()
        (fire-and-forget,                    LockService.getScriptLock()
         text/plain body,                    read old A:B (Nickname/Chips)
         silent on success/failure)          diff old vs new → active list
-                                             clear A2:C<lastRow>
-                                             write new A:B, new C
+                                             clear A2:D<lastRow>
+                                             write new A:B, new D (C blank)
                                           ◀── JSON ack ──               "Player stacks" tab
 ```
 
@@ -37,13 +37,14 @@ The diff (old vs. new snapshot) happens **server-side in Apps Script**, not in t
 
 A new tab, `Player stacks`, added to the same Google Sheet that `sheets_script.gs` is already bound to (via Extensions → Apps Script in that same sheet, adding a new `.gs` file or appending to the existing one — the `onEdit` trigger in `sheets_script.gs` is unaffected since Web App endpoints and `onEdit` triggers are independent).
 
-Header row 1, three columns:
+Header row 1, four columns (C is a deliberate blank spacer):
 
 | Column | Header | Contents |
 |---|---|---|
 | A | `Nickname` | Row-aligned with B. Full roster from the most recent upload — players missing from the latest upload are dropped; new ones are added. |
 | B | `Chips` | Row-aligned with A. The chip count from the most recent upload. |
-| C | `Active players` | **Not** row-aligned with A/B. An independent stacked list (starting row 2) of nicknames that were new or had a changed chip value on this sync. Cleared and fully rewritten every sync — reflects only the latest upload's changes, no accumulated history. |
+| C | *(blank)* | Spacer column — always empty. |
+| D | `Active players` | **Not** row-aligned with A/B. An independent stacked list (starting row 2) of nicknames that were new or had a changed chip value on this sync. Cleared and fully rewritten every sync — reflects only the latest upload's changes, no accumulated history. |
 
 If the `Player stacks` tab doesn't exist yet, `doPost` creates it (with headers) on first write.
 
@@ -93,7 +94,7 @@ Added to the Google Sheet's Apps Script project (new file, e.g. `player_stacks_s
 - Gets or creates the `Player stacks` sheet; ensures header row.
 - Reads existing A2:B<lastRow> into an old-snapshot map (lowercased nickname → chips).
 - Computes new roster (as given) and active list per the diff rules above.
-- Clears `A2:C<lastRow>` (old last row), then writes the new roster into A/B and the active list into C.
+- Clears `A2:D<lastRow>` (old last row), then writes the new roster into A/B and the active list into D (C stays blank as a spacer).
 - Returns `ContentService.createTextOutput(JSON.stringify({ success: true, total: ..., active: ... })).setMimeType(ContentService.MimeType.JSON)`.
 - Deployment: Deploy → New deployment → Web app, execute as "Me", access "Anyone" (no shared secret, per decision above). The resulting `/exec` URL is what goes into `VITE_PLAYER_STACKS_URL`.
 
