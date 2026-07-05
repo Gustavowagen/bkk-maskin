@@ -7,7 +7,6 @@ import ParticlesBackground from './components/ParticlesBackground'
 import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile, extractPlayerStacks, syncPlayerStacks } from './utils/excelUtils'
 import type { NicknameWithLine } from './types'
 
-//
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
