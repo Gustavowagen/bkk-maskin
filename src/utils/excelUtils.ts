@@ -258,11 +258,16 @@ export const syncPlayerStacks = async (players: PlayerStack[]): Promise<void> =>
   }
 
   try {
-    // text/plain avoids a CORS preflight OPTIONS request, which Apps Script
-    // Web Apps don't handle. The body is still JSON; Apps Script parses it
-    // from e.postData.contents regardless of the declared content type.
+    // no-cors: Apps Script Web App responses don't send an
+    // Access-Control-Allow-Origin header, so a normal cross-origin fetch()
+    // gets blocked even though the request executes successfully server-side.
+    // We never read the response (silent sync by design), so an opaque
+    // no-cors response is fine. text/plain avoids a CORS preflight OPTIONS
+    // request; the body is still JSON, which Apps Script parses from
+    // e.postData.contents regardless of the declared content type.
     await fetch(url, {
       method: 'POST',
+      mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ players })
     });
