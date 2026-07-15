@@ -333,8 +333,11 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
       }
     });
     
-    // Main table has 11 columns, transfer table has 5 columns per table (3 tables with 3 empty cells between = 23 columns total)
-    const mainTableColumnCount = 11;
+    // Main table column count varies by club (11 for Knekt with Name, 10 for Stvg without) —
+    // derive it from the actual header row instead of hardcoding, so this function
+    // stays club-agnostic. Transfer table has 5 columns per table (3 tables with
+    // 3 empty cells between = 23 columns total), independent of main table width.
+    const mainTableColumnCount = data[0]?.length || 11;
     
     // Process all cells in the row
     for (let colNumber = 1; colNumber <= Math.max(excelRow.cellCount, 20); colNumber++) {
