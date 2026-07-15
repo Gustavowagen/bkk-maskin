@@ -88,14 +88,16 @@ export const detectClub = (workbook: XLSX.WorkBook): Club => {
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
- * - Adds "Name" column with real name from nameMapping
+ * - For club 'knekt': adds "Name" column with real name from nameMapping
+ * - For club 'stvg': omits the "Name" column entirely and never looks up nameMapping
  * - Adds "Has Line" column (Yes/No)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
   nicknames: NicknameWithLine[],
-  nameMapping: Map<string, string> = new Map()
+  nameMapping: Map<string, string>,
+  club: Club
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = 'Club Member Balance';
@@ -106,11 +108,11 @@ export const filterWorkbookByNicknames = (
   }
 
   const worksheet = workbook.Sheets[targetSheetName];
-  
+
   // Convert sheet to JSON for easier processing
-  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, { 
+  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
     header: 1,
-    defval: '' 
+    defval: ''
   });
 
   // If no nicknames provided, return empty workbook
@@ -127,12 +129,15 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
 
+  // Profit/Loss lives one column earlier for Stvg since the Name column is omitted.
+  const profitLossIndex = club === 'stvg' ? 4 : 5;
+
   dataWithoutFirstThreeRows.forEach((row) => {
     const columnK = row[10] ? String(row[10]).toLowerCase() : '';
     const columnL = row[11] !== undefined ? row[11] : 0;
 
     // Check if any nickname matches the start of column K (case-insensitive)
-    const matchingNickname = nicknames.find(nicknameObj => 
+    const matchingNickname = nicknames.find(nicknameObj =>
       columnK.startsWith(nicknameObj.nickname.toLowerCase())
     );
 
@@ -140,15 +145,7 @@ export const filterWorkbookByNicknames = (
       const hasLine = matchingNickname.line !== undefined;
       const hasLineValue = hasLine ? 'Yes' : 'No';
       const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
-      
-      // The actual nickname from the Excel file (column K)
-      const actualNickname = String(row[10]);
-      
-      // Get real name from mapping (case-insensitive lookup)
-      // Try both the actual nickname from Excel and the user-entered nickname
-      const realName = nameMapping.get(actualNickname.toLowerCase()) || 
-                       nameMapping.get(matchingNickname.nickname.toLowerCase()) || '';
-      
+
       // Calculate profit/loss
       let profitLoss: number;
       if (hasLine && matchingNickname.line !== undefined) {
@@ -160,7 +157,20 @@ export const filterWorkbookByNicknames = (
       // Round down to integer (floor for positive, ceil for negative to round towards zero)
       profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
-      const rowData = [row[10], realName, lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
+      let rowData: any[];
+      if (club === 'stvg') {
+        rowData = [row[10], lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
+      } else {
+        // The actual nickname from the Excel file (column K)
+        const actualNickname = String(row[10]);
+
+        // Get real name from mapping (case-insensitive lookup)
+        // Try both the actual nickname from Excel and the user-entered nickname
+        const realName = nameMapping.get(actualNickname.toLowerCase()) ||
+                         nameMapping.get(matchingNickname.nickname.toLowerCase()) || '';
+
+        rowData = [row[10], realName, lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
+      }
 
       // Split into positive and negative arrays
       if (profitLoss >= 0) {
@@ -172,13 +182,17 @@ export const filterWorkbookByNicknames = (
   });
 
   // Sort both arrays by profit/loss (highest first)
-  positiveData.sort((a, b) => b[5] - a[5]);
-  negativeData.sort((a, b) => b[5] - a[5]);
+  positiveData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
+  negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
 
   // Add headers for main tables
-  const positiveHeaders = ['Nickname', 'Name', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = ['Nickname', 'Name', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
-  
+  const positiveHeaders = club === 'stvg'
+    ? ['Nickname', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp']
+    : ['Nickname', 'Name', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = club === 'stvg'
+    ? ['Nickname', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp']
+    : ['Nickname', 'Name', 'Line Amount', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
   const emptyTransferRows = Array(10).fill(['', '', '', '', '']); // 10 empty rows for user input
