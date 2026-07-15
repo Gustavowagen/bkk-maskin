@@ -3,6 +3,8 @@ export interface NicknameWithLine {
   line?: number; // Optional line value
 }
 
+export type Club = 'knekt' | 'stvg';
+
 export interface PlayerStack {
   nickname: string;
   chips: number;
