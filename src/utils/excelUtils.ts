@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { NicknameWithLine, PlayerStack } from '../types';
+import type { NicknameWithLine, PlayerStack, Club } from '../types';
 
 /**
  * Read an Excel file and return a workbook
@@ -54,6 +54,32 @@ export const readNameFile = async (file: File): Promise<Map<string, string>> => 
   });
   
   return nameMapping;
+};
+
+/**
+ * Detect which club an uploaded context file belongs to, by reading a
+ * fixed cell in the "Club Overview" sheet: row 6, column D, directly
+ * under the "Club Name" sub-header (see images/sepparator.png for the
+ * reference layout — same 5-row header block pattern as "Club Member
+ * Balance").
+ */
+export const detectClub = (workbook: XLSX.WorkBook): Club => {
+  const sheetName = 'Club Overview';
+
+  if (!workbook.SheetNames.includes(sheetName)) {
+    throw new Error(`Sheet "${sheetName}" not found in the uploaded file.`);
+  }
+
+  const worksheet = workbook.Sheets[sheetName];
+  const data: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+  const raw = data[5]?.[3];
+  const name = String(raw ?? '').trim().toLowerCase();
+
+  if (name === 'knekt kortklubb') return 'knekt';
+  if (name === 'stvg kortklubb') return 'stvg';
+
+  throw new Error(`Unrecognized club "${String(raw ?? '')}" in Club Overview sheet.`);
 };
 
 /**
