@@ -115,7 +115,7 @@ function App() {
           </p>
         )}
 
-        {file && !isFiltered && (
+        {club && !isFiltered && (
           <>
             <NicknameInput 
               nicknames={nicknames} 
