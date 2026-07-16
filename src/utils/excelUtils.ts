@@ -319,7 +319,7 @@ export const syncPlayerStacks = async (players: PlayerStack[]): Promise<void> =>
 /**
  * Generate and download Excel file with styling
  */
-export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
+export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string, club: Club): Promise<void> => {
   // Create a new ExcelJS workbook
   const excelWorkbook = new ExcelJS.Workbook();
   
@@ -331,6 +331,13 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Add worksheet to ExcelJS workbook
   const excelWorksheet = excelWorkbook.addWorksheet(sheetName);
   
+  // Main table column count varies by club (11 for Knekt with Name, 10 for Stvg without).
+  // Can't be derived from the sheet data itself: sheet_to_json pads every row out to the
+  // sheet's overall column range (21, from the always-present transfer table header), so
+  // data[0].length is always 21 regardless of club — the actual count must come from the
+  // caller, which already knows it (filterWorkbookByNicknames branches on the same club).
+  const mainTableColumnCount = club === 'stvg' ? 10 : 11;
+
   // Add data to worksheet
   data.forEach((row, rowIndex) => {
     const excelRow = excelWorksheet.addRow(row);
@@ -372,12 +379,6 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
         }
       }
     });
-    
-    // Main table column count varies by club (11 for Knekt with Name, 10 for Stvg without) —
-    // derive it from the actual header row instead of hardcoding, so this function
-    // stays club-agnostic. Transfer table has 5 columns per table (3 tables with
-    // 3 empty cells between = 23 columns total), independent of main table width.
-    const mainTableColumnCount = data[0]?.length || 11;
     
     // Process all cells in the row
     for (let colNumber = 1; colNumber <= Math.max(excelRow.cellCount, 20); colNumber++) {
