@@ -286,14 +286,18 @@ export const extractPlayerStacks = (workbook: XLSX.WorkBook): PlayerStack[] => {
 /**
  * Fire-and-forget sync of the latest player roster to the external
  * "Player stacks" Google Sheet via an Apps Script Web App endpoint.
- * Silent by design: no UI feedback is shown on success or failure,
- * per the approved player-stacks-sync design doc.
+ * Knekt and Stvg sync to two separate spreadsheets/deployments, selected
+ * by `club`. Silent by design: no UI feedback is shown on success or
+ * failure, per the approved player-stacks-sync design doc.
  */
-export const syncPlayerStacks = async (players: PlayerStack[]): Promise<void> => {
-  const url = import.meta.env.VITE_PLAYER_STACKS_URL as string | undefined;
+export const syncPlayerStacks = async (players: PlayerStack[], club: Club): Promise<void> => {
+  const envVarName = club === 'stvg' ? 'VITE_PLAYER_STACKS_URL_STVG' : 'VITE_PLAYER_STACKS_URL';
+  const url = club === 'stvg'
+    ? (import.meta.env.VITE_PLAYER_STACKS_URL_STVG as string | undefined)
+    : (import.meta.env.VITE_PLAYER_STACKS_URL as string | undefined);
 
   if (!url) {
-    console.warn('VITE_PLAYER_STACKS_URL is not set; skipping player stacks sync.');
+    console.warn(`${envVarName} is not set; skipping player stacks sync.`);
     return;
   }
 
