@@ -4,8 +4,8 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile, extractPlayerStacks, syncPlayerStacks } from './utils/excelUtils'
-import type { NicknameWithLine } from './types'
+import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile, extractPlayerStacks, syncPlayerStacks, detectClub } from './utils/excelUtils'
+import type { NicknameWithLine, Club } from './types'
 
 
 function App() {
@@ -16,6 +16,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isFiltered, setIsFiltered] = useState(false)
   const [nicknames, setNicknames] = useState<NicknameWithLine[]>([])
+  const [club, setClub] = useState<Club | null>(null)
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
@@ -49,32 +50,35 @@ function App() {
     setFile(uploadedFile)
     setIsFiltered(false)
     setFilteredWorkbook(null)
-    
+    setClub(null)
+
     try {
       const wb = await readExcelFile(uploadedFile)
+      const detectedClub = detectClub(wb)
       setWorkbook(wb)
+      setClub(detectedClub)
 
       // Silent, best-effort sync — must never block the upload flow above.
       try {
         const players = extractPlayerStacks(wb)
-        syncPlayerStacks(players)
+        syncPlayerStacks(players, detectedClub)
       } catch (error) {
         console.error('Error extracting player stacks:', error)
       }
     } catch (error) {
       console.error('Error reading file:', error)
-      alert('Error reading Excel file. Please make sure it is a valid Excel file.')
+      alert(error instanceof Error ? error.message : 'Error reading Excel file. Please make sure it is a valid Excel file.')
     }
   }
 
   const handleFilter = () => {
-    if (!workbook) return
-    
+    if (!workbook || !club) return
+
     setIsProcessing(true)
-    
+
     try {
       // Apply filtering logic with name mapping
-      const filtered = filterWorkbookByNicknames(workbook, nicknames, nameMapping)
+      const filtered = filterWorkbookByNicknames(workbook, nicknames, nameMapping, club)
       setFilteredWorkbook(filtered)
       setIsFiltered(true)
     } catch (error) {
@@ -86,10 +90,10 @@ function App() {
   }
 
   const handleDownload = async () => {
-    if (!filteredWorkbook) return
-    
+    if (!filteredWorkbook || !club) return
+
     const originalName = file?.name.replace(/\.xlsx?$/i, '') || 'filtered'
-    await downloadExcelFile(filteredWorkbook, `${originalName}_filtered.xlsx`)
+    await downloadExcelFile(filteredWorkbook, `${originalName}_filtered.xlsx`, club)
   }
 
   return (
@@ -104,6 +108,12 @@ function App() {
           label="Choose Context File"
           id="context-file"
         />
+
+        {club && (
+          <p className="info-message">
+            Detected club: {club === 'stvg' ? 'Stvg Kortklubb' : 'Knekt Kortklubb'}
+          </p>
+        )}
 
         {file && !isFiltered && (
           <>
