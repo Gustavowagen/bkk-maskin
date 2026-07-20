@@ -33,7 +33,7 @@ function onEdit(e) {
 
   sheet.getRange(editedRow, section.profitLossCol).setValue(Math.trunc(chips - line));
 }
-/
+
 /**
  * Scans every row of the sheet for a row that contains all three headers.
  * Returns an array of section descriptors sorted by row number.
