@@ -4,7 +4,8 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile,filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import { readExcelFile, extractMemberStatistics, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import type { MemberStatistic } from './utils/excelUtils'
 import type { NicknameWithLine } from './types'
 
 
@@ -15,6 +16,7 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isFiltered, setIsFiltered] = useState(false)
   const [nicknames, setNicknames] = useState<NicknameWithLine[]>([])
+  const [memberStatistics, setMemberStatistics] = useState<MemberStatistic[]>([])
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
@@ -24,13 +26,26 @@ function App() {
     setIsFiltered(false)
     setFilteredWorkbook(null)
 
+    let wb: XLSX.WorkBook
     try {
-      const wb = await readExcelFile(uploadedFile)
-      setWorkbook(wb)
+      wb = await readExcelFile(uploadedFile)
     } catch (error) {
       console.error('Error reading file:', error)
       alert(error instanceof Error ? error.message : 'Error reading Excel file. Please make sure it is a valid Excel file.')
+      return
     }
+
+    try {
+      const stats = extractMemberStatistics(wb)
+      setMemberStatistics(stats)
+      setNicknames(stats.map(({ nickname }) => ({ nickname, line: undefined })))
+    } catch (error) {
+      console.error('Error finding active players:', error)
+      setMemberStatistics([])
+      setNicknames([])
+      alert(`${error instanceof Error ? error.message : 'Could not find active players.'} Please enter the players manually.`)
+    }
+    setWorkbook(wb)
   }
 
   const handleFilter = () => {
@@ -39,7 +54,7 @@ function App() {
     setIsProcessing(true)
 
     try {
-      const filtered = filterWorkbookByNicknames(workbook, nicknames)
+      const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics)
       setFilteredWorkbook(filtered)
       setIsFiltered(true)
     } catch (error) {
@@ -73,6 +88,7 @@ function App() {
         {workbook && !isFiltered && (
           <>
             <NicknameInput 
+              key={file ? `${file.name}-${file.lastModified}` : undefined}
               nicknames={nicknames} 
               onNicknamesChange={setNicknames} 
             />

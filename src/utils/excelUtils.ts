@@ -22,15 +22,36 @@ export const readExcelFile = (file: File): Promise<XLSX.WorkBook> => {
   });
 };
 
-const normalizeHeader = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+// Compare headers ignoring case and whitespace, so "Rake&Fee" matches "Rake & Fee"
+const normalizeHeader = (value: unknown): string => String(value ?? '').replace(/\s+/g, '').toLowerCase();
 
 /**
- * Find the nicknames of all active players in the "Member Statistics" sheet.
- * - Locates the "Member" header cell (usually merged across Country/Role/ID/Nickname)
- * - Locates the "Nickname" sub-header underneath it
- * - Reads every nickname below that until the "TOTAL" row
+ * Parse a numeric cell. Handles real numbers as well as text with spaces as thousands
+ * separators, "," as decimal separator or a unicode minus sign (e.g. "1 271,98").
  */
-export const extractActivePlayers = (workbook: XLSX.WorkBook): string[] => {
+const parseNumber = (value: unknown): number => {
+  if (typeof value === 'number') return value;
+  const text = String(value ?? '')
+    .replace(/\s/g, '') // also matches non-breaking and narrow no-break spaces
+    .split(String.fromCharCode(0x2212)).join('-') // unicode minus sign
+    .replace(',', '.');
+  const parsed = parseFloat(text);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+export interface MemberStatistic {
+  nickname: string;
+  rake: number;
+}
+
+/**
+ * Read the active players and their total rake from the "Member Statistics" sheet.
+ * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
+ *   the "Nickname" sub-header underneath it
+ * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
+ * - Reads every row below that until the "TOTAL" row
+ */
+export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatistic[] => {
   const targetSheetName = 'Member Statistics';
   const sheetName = workbook.SheetNames.find(name => normalizeHeader(name) === normalizeHeader(targetSheetName));
   if (!sheetName) {
@@ -43,63 +64,67 @@ export const extractActivePlayers = (workbook: XLSX.WorkBook): string[] => {
   // sheet_to_json indexes from the start of the range, so translate back to sheet coordinates
   const cellAt = (r: number, c: number) => rows[r - range.s.r]?.[c - range.s.c];
 
-  // Find the "Member" header cell
-  let memberRow = -1;
-  let memberCol = -1;
-  for (let r = range.s.r; r <= range.e.r && memberRow === -1; r++) {
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      if (normalizeHeader(cellAt(r, c)) === 'member') {
-        memberRow = r;
-        memberCol = c;
-        break;
+  /**
+   * Find a group header (e.g. "Member") and a sub-header beneath it (e.g. "Nickname").
+   * Returns the sub-header's row and column.
+   */
+  const findSubHeader = (groupHeader: string, subHeader: string): { row: number; col: number } => {
+    let groupRow = -1;
+    let groupCol = -1;
+    for (let r = range.s.r; r <= range.e.r && groupRow === -1; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        if (normalizeHeader(cellAt(r, c)) === normalizeHeader(groupHeader)) {
+          groupRow = r;
+          groupCol = c;
+          break;
+        }
       }
     }
-  }
-  if (memberRow === -1) {
-    throw new Error(`Could not find the "Member" column in the "${targetSheetName}" sheet.`);
-  }
-
-  // Determine which columns belong to "Member": use its merge range, otherwise
-  // extend right until the next non-empty header in the same row
-  const merge = (worksheet['!merges'] ?? []).find(m =>
-    m.s.r <= memberRow && memberRow <= m.e.r && m.s.c <= memberCol && memberCol <= m.e.c
-  );
-  let memberEndCol = merge ? merge.e.c : memberCol;
-  if (!merge) {
-    while (memberEndCol + 1 <= range.e.c && normalizeHeader(cellAt(memberRow, memberEndCol + 1)) === '') {
-      memberEndCol++;
+    if (groupRow === -1) {
+      throw new Error(`Could not find the "${groupHeader}" column in the "${targetSheetName}" sheet.`);
     }
-  }
 
-  // Find the "Nickname" sub-header under "Member"
-  let nicknameRow = -1;
-  let nicknameCol = -1;
-  for (let r = memberRow + 1; r <= Math.min(memberRow + 5, range.e.r) && nicknameRow === -1; r++) {
-    for (let c = memberCol; c <= memberEndCol; c++) {
-      if (normalizeHeader(cellAt(r, c)) === 'nickname') {
-        nicknameRow = r;
-        nicknameCol = c;
-        break;
+    // Determine which columns belong to the group: use its merge range, otherwise
+    // extend right until the next non-empty header in the same row
+    const merge = (worksheet['!merges'] ?? []).find(m =>
+      m.s.r <= groupRow && groupRow <= m.e.r && m.s.c <= groupCol && groupCol <= m.e.c
+    );
+    let groupEndCol = merge ? merge.e.c : groupCol;
+    if (!merge) {
+      while (groupEndCol + 1 <= range.e.c && normalizeHeader(cellAt(groupRow, groupEndCol + 1)) === '') {
+        groupEndCol++;
       }
     }
-  }
-  if (nicknameRow === -1) {
-    throw new Error(`Could not find the "Nickname" column under "Member" in the "${targetSheetName}" sheet.`);
-  }
 
-  const players: string[] = [];
+    const firstSubRow = merge ? merge.e.r + 1 : groupRow + 1;
+    for (let r = firstSubRow; r <= Math.min(firstSubRow + 4, range.e.r); r++) {
+      for (let c = groupCol; c <= groupEndCol; c++) {
+        if (normalizeHeader(cellAt(r, c)) === normalizeHeader(subHeader)) {
+          return { row: r, col: c };
+        }
+      }
+    }
+    throw new Error(`Could not find the "${subHeader}" column under "${groupHeader}" in the "${targetSheetName}" sheet.`);
+  };
+
+  const nicknameHeader = findSubHeader('Member', 'Nickname');
+  const rakeHeader = findSubHeader('Rake&Fee', 'Total');
+  // Header cells can be merged vertically, so data starts below the lowest header row
+  const firstDataRow = Math.max(nicknameHeader.row, rakeHeader.row) + 1;
+
+  const players: MemberStatistic[] = [];
   const seen = new Set<string>();
-  for (let r = nicknameRow + 1; r <= range.e.r; r++) {
+  for (let r = firstDataRow; r <= range.e.r; r++) {
     const row = rows[r - range.s.r] ?? [];
     if (row.some(cell => normalizeHeader(cell) === 'total')) break;
 
-    const nickname = String(cellAt(r, nicknameCol) ?? '').trim();
+    const nickname = String(cellAt(r, nicknameHeader.col) ?? '').trim();
     if (!nickname || nickname === '-') continue;
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push(nickname);
+      players.push({ nickname, rake: parseNumber(cellAt(r, rakeHeader.col)) });
     }
   }
 
@@ -112,11 +137,14 @@ export const extractActivePlayers = (workbook: XLSX.WorkBook): string[] => {
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
- * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L)
+ * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
+ * - Adds "Rakeback" column (rake * rakeback %)
+ * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L, plus rakeback)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
-  nicknames: NicknameWithLine[]
+  nicknames: NicknameWithLine[],
+  memberStatistics: MemberStatistic[] = []
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = 'Club Member Balance';
@@ -148,7 +176,17 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
 
-  const profitLossIndex = 3;
+  const profitLossIndex = 5;
+
+  const rakeByNickname = new Map(memberStatistics.map(m => [m.nickname.toLowerCase(), m.rake]));
+  // Entered nicknames normally match exactly, but fall back to prefix matching like the chips lookup does
+  const findRake = (nickname: string): number => {
+    const key = nickname.toLowerCase();
+    const exact = rakeByNickname.get(key);
+    if (exact !== undefined) return exact;
+    const prefixMatch = memberStatistics.find(m => m.nickname.toLowerCase().startsWith(key));
+    return prefixMatch ? prefixMatch.rake : 0;
+  };
 
   dataWithoutFirstThreeRows.forEach((row) => {
     const columnK = row[10] ? String(row[10]).toLowerCase() : '';
@@ -163,6 +201,11 @@ export const filterWorkbookByNicknames = (
       const hasLine = matchingNickname.line !== undefined;
       const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
 
+      const rake = findRake(matchingNickname.nickname);
+      const rakeback = matchingNickname.rakeback !== undefined
+        ? Math.round(rake * matchingNickname.rakeback) / 100
+        : '';
+
       // Calculate profit/loss
       let profitLoss: number;
       if (hasLine && matchingNickname.line !== undefined) {
@@ -170,11 +213,13 @@ export const filterWorkbookByNicknames = (
       } else {
         profitLoss = Number(columnL);
       }
+      // Rakeback is paid out to the player, so it adds to their profit
+      profitLoss += Number(rakeback || 0);
 
       // Round down to integer (floor for positive, ceil for negative to round towards zero)
       profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
-      const rowData = [row[10], lineAmount, columnL, profitLoss, '', '', '', '', ''];
+      const rowData = [row[10], lineAmount, columnL, rake, rakeback, profitLoss, '', '', '', '', ''];
 
       // Split into positive and negative arrays
       if (profitLoss >= 0) {
@@ -190,8 +235,8 @@ export const filterWorkbookByNicknames = (
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
 
   // Add headers for main tables
-  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
@@ -261,7 +306,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Main table column count. Can't be derived from the sheet data itself: sheet_to_json
   // pads every row out to the sheet's overall column range (21, from the always-present
   // transfer table header), so data[0].length is always 21.
-  const mainTableColumnCount = 9;
+  const mainTableColumnCount = 11;
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {

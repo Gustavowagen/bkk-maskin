@@ -1,6 +1,7 @@
 export interface NicknameWithLine {
   nickname: string;
   line?: number; // Optional line value
+  rakeback?: number; // Optional rakeback in percent (30 = 30%)
 }
 
 export interface AppState {
