@@ -112,7 +112,6 @@ export const extractActivePlayers = (workbook: XLSX.WorkBook): string[] => {
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
- * - Adds "Has Line" column (Yes/No)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L)
  */
 export const filterWorkbookByNicknames = (
@@ -149,7 +148,7 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
 
-  const profitLossIndex = 4;
+  const profitLossIndex = 3;
 
   dataWithoutFirstThreeRows.forEach((row) => {
     const columnK = row[10] ? String(row[10]).toLowerCase() : '';
@@ -162,7 +161,6 @@ export const filterWorkbookByNicknames = (
 
     if (matchingNickname) {
       const hasLine = matchingNickname.line !== undefined;
-      const hasLineValue = hasLine ? 'Yes' : 'No';
       const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
 
       // Calculate profit/loss
@@ -176,7 +174,7 @@ export const filterWorkbookByNicknames = (
       // Round down to integer (floor for positive, ceil for negative to round towards zero)
       profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
-      const rowData = [row[10], lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
+      const rowData = [row[10], lineAmount, columnL, profitLoss, '', '', '', '', ''];
 
       // Split into positive and negative arrays
       if (profitLoss >= 0) {
@@ -192,8 +190,8 @@ export const filterWorkbookByNicknames = (
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
 
   // Add headers for main tables
-  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
@@ -263,7 +261,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Main table column count. Can't be derived from the sheet data itself: sheet_to_json
   // pads every row out to the sheet's overall column range (21, from the always-present
   // transfer table header), so data[0].length is always 21.
-  const mainTableColumnCount = 10;
+  const mainTableColumnCount = 9;
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {
