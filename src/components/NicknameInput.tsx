@@ -1,10 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { NicknameWithLine } from '../types';
 import './NicknameInput.css';
 
 interface NicknameInputProps {
   nicknames: NicknameWithLine[];
   onNicknamesChange: (nicknames: NicknameWithLine[]) => void;
+}
+
+/**
+ * One editable row in the player table. Line and rakeback are kept as raw text
+ * so partially typed values (e.g. "4,") are not lost while editing.
+ */
+interface PlayerRow {
+  id: number;
+  nickname: string;
+  lineText: string;
+  rakebackText: string;
+  owner: boolean;
 }
 
 /**
@@ -15,103 +27,137 @@ const parseDecimal = (value: string): number | undefined => {
   return isNaN(parsed) ? undefined : parsed;
 };
 
-/**
- * Parse textarea content to extract nicknames, optional lines and optional rakeback
- * Format:
- * - "nickname", "nickname/line", "nickname#rakeback" or "nickname/line#rakeback"
- * - One entry per line
- * - Line values are in 1000s (e.g., 5 = 5000, 4.5 = 4500)
- * - Rakeback is in percent (e.g., 30 = 30%)
- * - Accepts both "." and "," as decimal separators
- * Examples:
- * - "gus" -> {nickname: "gus"}
- * - "gus/5" -> {nickname: "gus", line: 5000}
- * - "gus/4,728" -> {nickname: "gus", line: 4728}
- * - "gus#30" -> {nickname: "gus", rakeback: 30}
- * - "gus/10#30" -> {nickname: "gus", line: 10000, rakeback: 30}
- */
-const parseNicknameText = (text: string): NicknameWithLine[] => {
-  const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-  const nicknames: NicknameWithLine[] = [];
+let nextRowId = 0;
 
-  lines.forEach(line => {
-    let rest = line;
-    let rakeback: number | undefined;
-    let lineValue: number | undefined;
-
-    const hashIndex = rest.lastIndexOf('#');
-    if (hashIndex !== -1) {
-      rakeback = parseDecimal(rest.slice(hashIndex + 1));
-      rest = rest.slice(0, hashIndex);
-    }
-
-    const slashIndex = rest.lastIndexOf('/');
-    if (slashIndex !== -1) {
-      const parsedLine = parseDecimal(rest.slice(slashIndex + 1));
-      lineValue = parsedLine !== undefined ? parsedLine * 1000 : undefined;
-      rest = rest.slice(0, slashIndex);
-    }
-
-    const nickname = rest.trim();
-    if (nickname) {
-      nicknames.push({ nickname, line: lineValue, rakeback });
-    }
-  });
-
-  return nicknames;
-};
+const toRow = (n: NicknameWithLine): PlayerRow => ({
+  id: nextRowId++,
+  nickname: n.nickname,
+  lineText: n.line !== undefined ? String(n.line / 1000) : '',
+  rakebackText: n.rakeback !== undefined ? String(n.rakeback) : '',
+  owner: n.owner ?? false,
+});
 
 /**
- * Convert nicknames array back to text format for display
- * Line values are divided by 1000 for display
+ * Convert table rows to nicknames. Rows without a nickname are skipped.
+ * Line values are entered in 1000s (e.g., 5 = 5000, 4,5 = 4500), rakeback in percent.
  */
-const formatNicknamesAsText = (nicknames: NicknameWithLine[]): string => {
-  return nicknames.map(n => {
-    let text = n.nickname;
-    if (n.line !== undefined) text += `/${n.line / 1000}`;
-    if (n.rakeback !== undefined) text += `#${n.rakeback}`;
-    return text;
-  }).join('\n');
-};
+const rowsToNicknames = (rows: PlayerRow[]): NicknameWithLine[] =>
+  rows
+    .filter(row => row.nickname.trim().length > 0)
+    .map(row => {
+      const parsedLine = parseDecimal(row.lineText);
+      return {
+        nickname: row.nickname.trim(),
+        line: parsedLine !== undefined ? parsedLine * 1000 : undefined,
+        rakeback: parseDecimal(row.rakebackText),
+        owner: row.owner,
+      };
+    });
 
 const NicknameInput: React.FC<NicknameInputProps> = ({ nicknames, onNicknamesChange }) => {
-  const [textValue, setTextValue] = useState('');
+  const [rows, setRows] = useState<PlayerRow[]>(() => nicknames.map(toRow));
 
-  // Initialize text value from nicknames prop
-  useEffect(() => {
-    setTextValue(formatNicknamesAsText(nicknames));
-  }, []);
+  const updateRows = (newRows: PlayerRow[]) => {
+    setRows(newRows);
+    onNicknamesChange(rowsToNicknames(newRows));
+  };
 
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newText = e.target.value;
-    setTextValue(newText);
-    
-    // Parse and update nicknames
-    const parsedNicknames = parseNicknameText(newText);
-    onNicknamesChange(parsedNicknames);
+  const updateRow = (id: number, changes: Partial<PlayerRow>) => {
+    updateRows(rows.map(row => (row.id === id ? { ...row, ...changes } : row)));
+  };
+
+  const addRow = () => {
+    updateRows([...rows, toRow({ nickname: '' })]);
+  };
+
+  const deleteRow = (id: number) => {
+    updateRows(rows.filter(row => row.id !== id));
   };
 
   return (
     <div className="nickname-input-container">
       <h3>Active Players</h3>
       <p className="nickname-hint">
-        Players found in the <code>Member Statistics</code> sheet. Format: <code>nickname/line#rakeback</code> — line in 1000s and rakeback in %, both optional (e.g. <code>gustavo/10#30</code> or <code>gustavo#30</code>).
+        Players found in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional.
       </p>
-      
-      <textarea
-        value={textValue}
-        onChange={handleTextChange}
-        placeholder="gustavo/10#30&#10;carlos&#10;conrado/4.5&#10;alberto#25"
-        className="nickname-textarea"
-        rows={6}
-      />
+
+      <table className="player-table">
+        <thead>
+          <tr>
+            <th>Nickname</th>
+            <th>Line</th>
+            <th>Rakeback %</th>
+            <th>Owner</th>
+            <th aria-label="Delete" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row => (
+            <tr key={row.id}>
+              <td>
+                <input
+                  type="text"
+                  className="player-input"
+                  value={row.nickname}
+                  onChange={e => updateRow(row.id, { nickname: e.target.value })}
+                  placeholder="nickname"
+                />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="player-input player-input-number"
+                  value={row.lineText}
+                  onChange={e => updateRow(row.id, { lineText: e.target.value })}
+                  placeholder="—"
+                />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="player-input player-input-number"
+                  value={row.rakebackText}
+                  onChange={e => updateRow(row.id, { rakebackText: e.target.value })}
+                  placeholder="—"
+                />
+              </td>
+              <td className="player-owner-cell">
+                <input
+                  type="checkbox"
+                  checked={row.owner}
+                  onChange={e => updateRow(row.id, { owner: e.target.checked })}
+                  aria-label={`${row.nickname || 'Player'} is owner`}
+                />
+              </td>
+              <td>
+                <button
+                  type="button"
+                  className="player-delete-button"
+                  onClick={() => deleteRow(row.id)}
+                  title="Delete player"
+                  aria-label={`Delete ${row.nickname || 'player'}`}
+                >
+                  ✕
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <button type="button" className="player-add-button" onClick={addRow}>
+        + Add player manually
+      </button>
 
       {nicknames.length > 0 && (
         <div className="nickname-summary">
           <p className="summary-text">
             <strong>{nicknames.length}</strong> active player(s)
             {' '}({nicknames.filter(n => n.line !== undefined).length} with line,
-            {' '}{nicknames.filter(n => n.rakeback !== undefined).length} with rakeback)
+            {' '}{nicknames.filter(n => n.rakeback !== undefined).length} with rakeback,
+            {' '}{nicknames.filter(n => n.owner).length} owner(s))
           </p>
         </div>
       )}

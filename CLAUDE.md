@@ -17,7 +17,7 @@ This is a single-page React + TypeScript app (Vite) that processes poker club Ex
 
 **Core data flow:**
 1. User uploads a "context file" (an Excel workbook that must contain a sheet named `Club Member Balance`).
-2. User enters player nicknames — optionally with a line amount using `nickname/line` format (line values are entered in thousands, stored as raw numbers internally).
+2. Active players are pre-filled into a table where the user can set line (entered in thousands, stored as raw numbers internally), rakeback % and owner per player, and add or delete players.
 3. `filterWorkbookByNicknames` in `excelUtils.ts` processes the workbook: skips first 3 rows, reads columns K (nickname) and L (chips), matches rows by prefix against entered nicknames, computes Profit/Loss, splits into positive/negative tables, and appends a transfer table scaffold.
 4. `downloadExcelFile` re-renders the filtered data using ExcelJS with borders and header styling before triggering a browser download.
 
@@ -27,5 +27,5 @@ This is a single-page React + TypeScript app (Vite) that processes poker club Ex
 
 **Key files:**
 - `src/utils/excelUtils.ts` — all Excel parsing, filtering, and download logic
-- `src/components/NicknameInput.tsx` — textarea parser; `nickname/line` format, comma or dot as decimal separator
+- `src/components/NicknameInput.tsx` — editable player table (nickname, line in 1000s, rakeback %, owner checkbox, add/delete rows); comma or dot as decimal separator
 - `src/types/index.ts` — `NicknameWithLine` interface (nickname string + optional line number in raw chips)
