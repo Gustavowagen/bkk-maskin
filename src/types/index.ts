@@ -5,11 +5,6 @@ export interface NicknameWithLine {
 
 export type Club = 'knekt' | 'stvg';
 
-export interface PlayerStack {
-  nickname: string;
-  chips: number;
-}
-
 export interface AppState {
   file: File | null;
   workbook: any | null; // XLSX.WorkBook

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { NicknameWithLine, PlayerStack, Club } from '../types';
+import type { NicknameWithLine, Club } from '../types';
 
 /**
  * Read an Excel file and return a workbook
@@ -241,83 +241,6 @@ export const filterWorkbookByNicknames = (
   XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, targetSheetName);
 
   return newWorkbook;
-};
-
-/**
- * Extract every player's nickname + chips from the "Club Member Balance" sheet.
- * Unlike filterWorkbookByNicknames (which only keeps rows matching user-entered
- * nicknames), this captures every data row regardless of Role, for syncing a
- * full roster snapshot to the external Player stacks database.
- */
-export const extractPlayerStacks = (workbook: XLSX.WorkBook): PlayerStack[] => {
-  const targetSheetName = 'Club Member Balance';
-
-  if (!workbook.SheetNames.includes(targetSheetName)) {
-    throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
-  }
-
-  const worksheet = workbook.Sheets[targetSheetName];
-
-  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    defval: ''
-  });
-
-  // Fixed 5-row header block: Union Name, Union ID, Period, merged category
-  // headers, sub-headers. Real data starts at row 6 (index 5).
-  const dataRows = jsonData.slice(5);
-
-  const players: PlayerStack[] = [];
-
-  dataRows.forEach((row) => {
-    const nickname = row[10] !== undefined ? String(row[10]).trim() : '';
-    const chips = row[11] !== undefined ? Number(row[11]) : NaN;
-
-    // Defensive guard against empty rows or header-like drift in the export format.
-    if (!nickname || nickname === '-' || nickname === 'Nickname') return;
-    if (Number.isNaN(chips)) return;
-
-    players.push({ nickname, chips });
-  });
-
-  return players;
-};
-
-/**
- * Fire-and-forget sync of the latest player roster to the external
- * "Player stacks" Google Sheet via an Apps Script Web App endpoint.
- * Knekt and Stvg sync to two separate spreadsheets/deployments, selected
- * by `club`. Silent by design: no UI feedback is shown on success or
- * failure, per the approved player-stacks-sync design doc.
- */
-export const syncPlayerStacks = async (players: PlayerStack[], club: Club): Promise<void> => {
-  const envVarName = club === 'stvg' ? 'VITE_PLAYER_STACKS_URL_STVG' : 'VITE_PLAYER_STACKS_URL';
-  const url = club === 'stvg'
-    ? (import.meta.env.VITE_PLAYER_STACKS_URL_STVG as string | undefined)
-    : (import.meta.env.VITE_PLAYER_STACKS_URL as string | undefined);
-
-  if (!url) {
-    console.warn(`${envVarName} is not set; skipping player stacks sync.`);
-    return;
-  }
-
-  try {
-    // no-cors: Apps Script Web App responses don't send an
-    // Access-Control-Allow-Origin header, so a normal cross-origin fetch()
-    // gets blocked even though the request executes successfully server-side.
-    // We never read the response (silent sync by design), so an opaque
-    // no-cors response is fine. text/plain avoids a CORS preflight OPTIONS
-    // request; the body is still JSON, which Apps Script parses from
-    // e.postData.contents regardless of the declared content type.
-    await fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ players })
-    });
-  } catch (error) {
-    console.error('Error syncing player stacks:', error);
-  }
 };
 
 /**
