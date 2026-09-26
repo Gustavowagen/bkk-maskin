@@ -136,6 +136,7 @@ const MAIN_TABLE_COLUMN_COUNT = 11;
 // The stats table sits to the right of the main table, with one empty column in between
 const STATS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
+const STATS_TABLE_COLUMN_COUNT = 2; // Brutto Rake, Netto Rake
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
@@ -188,7 +189,8 @@ export const findPlayersMissingFromBalance = (
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L, plus rakeback)
- * - Adds a stats table to the right of the main table ("Brutto Rake" = sum of all players' rake)
+ * - Adds a stats table to the right of the main table ("Brutto Rake" = sum of all players' rake,
+ *   "Netto Rake" = Brutto Rake - sum of all players' rakeback)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
@@ -319,10 +321,13 @@ export const filterWorkbookByNicknames = (
   ];
 
   // Stats table to the right of the main table
-  const bruttoRake = [...positiveData, ...negativeData].reduce((sum, row) => sum + Number(row[3] || 0), 0);
+  const allPlayerRows = [...positiveData, ...negativeData];
+  const bruttoRake = allPlayerRows.reduce((sum, row) => sum + Number(row[3] || 0), 0);
+  const totalRakeback = allPlayerRows.reduce((sum, row) => sum + Number(row[4] || 0), 0);
+  const nettoRake = bruttoRake - totalRakeback;
   const statsTable = [
-    ['Brutto Rake'],
-    [Math.round(bruttoRake * 100) / 100],
+    ['Brutto Rake', 'Netto Rake'],
+    [Math.round(bruttoRake * 100) / 100, Math.round(nettoRake * 100) / 100],
   ];
   statsTable.forEach((statsRow, i) => {
     const row = combinedData[i];
@@ -442,7 +447,11 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
         (cell as any).fill = null;
       }
       // Stats table to the right of the main table
-      else if (rowIndex < STATS_TABLE_ROW_COUNT && colNumber === statsTableColumnNumber) {
+      else if (
+        rowIndex < STATS_TABLE_ROW_COUNT &&
+        colNumber >= statsTableColumnNumber &&
+        colNumber < statsTableColumnNumber + STATS_TABLE_COLUMN_COUNT
+      ) {
         cell.border = {
           top: { style: 'thin' },
           left: { style: 'thin' },
