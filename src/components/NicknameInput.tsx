@@ -22,6 +22,8 @@ interface PlayerRow {
 /**
  * Parse a number that may use "," as decimal separator. Returns undefined if invalid.
  */
+const OWNER_RAKEBACK = 100;
+
 const parseDecimal = (value: string): number | undefined => {
   const parsed = parseFloat(value.trim().replace(',', '.'));
   return isNaN(parsed) ? undefined : parsed;
@@ -40,6 +42,7 @@ const toRow = (n: NicknameWithLine): PlayerRow => ({
 /**
  * Convert table rows to nicknames. Rows without a nickname are skipped.
  * Line values are entered in 1000s (e.g., 5 = 5000, 4,5 = 4500), rakeback in percent.
+ * Owners always get 100% rakeback.
  */
 const rowsToNicknames = (rows: PlayerRow[]): NicknameWithLine[] =>
   rows
@@ -49,7 +52,7 @@ const rowsToNicknames = (rows: PlayerRow[]): NicknameWithLine[] =>
       return {
         nickname: row.nickname.trim(),
         line: parsedLine !== undefined ? parsedLine * 1000 : undefined,
-        rakeback: parseDecimal(row.rakebackText),
+        rakeback: row.owner ? OWNER_RAKEBACK : parseDecimal(row.rakebackText),
         owner: row.owner,
       };
     });
@@ -78,7 +81,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({ nicknames, onNicknamesCha
     <div className="nickname-input-container">
       <h3>Active Players</h3>
       <p className="nickname-hint">
-        Players found in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional.
+        Players found in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional. Owners always get 100% rakeback.
       </p>
 
       <table className="player-table">
@@ -118,9 +121,11 @@ const NicknameInput: React.FC<NicknameInputProps> = ({ nicknames, onNicknamesCha
                   type="text"
                   inputMode="decimal"
                   className="player-input player-input-number"
-                  value={row.rakebackText}
+                  value={row.owner ? String(OWNER_RAKEBACK) : row.rakebackText}
                   onChange={e => updateRow(row.id, { rakebackText: e.target.value })}
                   placeholder="—"
+                  disabled={row.owner}
+                  title={row.owner ? 'Owners always get 100% rakeback' : undefined}
                 />
               </td>
               <td className="player-owner-cell">
