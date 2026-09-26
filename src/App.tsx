@@ -4,7 +4,7 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, extractMemberStatistics, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import { readExcelFile, extractMemberStatistics, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
 import type { MemberStatistic } from './utils/excelUtils'
 import type { NicknameWithLine } from './types'
 
@@ -20,6 +20,23 @@ function App() {
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
+
+  // Players without a "Club Member Balance" row; they are added to the document with 0 chips
+  const missingPlayers = useMemo(() => {
+    if (!workbook) return []
+    try {
+      return findPlayersMissingFromBalance(workbook, nicknames)
+    } catch {
+      return []
+    }
+  }, [workbook, nicknames])
+
+  const missingPlayersWarning = missingPlayers.length > 0 && (
+    <p className="warning-message">
+      ⚠️ {missingPlayers.length} player(s) not found in the "Club Member Balance" sheet and added as "Left Club?" (counted as 0 chips):{' '}
+      <strong>{missingPlayers.map(p => p.nickname).join(', ')}</strong>
+    </p>
+  )
 
   const handleFileUpload = async (uploadedFile: File) => {
     setFile(uploadedFile)
@@ -106,6 +123,8 @@ function App() {
                 ⚠️ No nicknames added. The filtered file will be empty.
               </p>
             )}
+
+            {missingPlayersWarning}
           </>
         )}
 
@@ -115,6 +134,7 @@ function App() {
             <p className="info-message">
               Filtered {nicknames.length} nickname(s)
             </p>
+            {missingPlayersWarning}
             <button 
               className="download-button"
               onClick={handleDownload}

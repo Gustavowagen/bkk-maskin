@@ -60,7 +60,7 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
 
   const worksheet = workbook.Sheets[sheetName];
   const range = XLSX.utils.decode_range(worksheet['!ref'] ?? 'A1');
-  const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', range });
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', range });
   // sheet_to_json indexes from the start of the range, so translate back to sheet coordinates
   const cellAt = (r: number, c: number) => rows[r - range.s.r]?.[c - range.s.c];
 
@@ -131,15 +131,64 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
   return players;
 };
 
+// Number of columns in the main (positive/negative) tables
+const MAIN_TABLE_COLUMN_COUNT = 11;
+// The stats table sits to the right of the main table, with one empty column in between
+const STATS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
+const STATS_TABLE_ROW_COUNT = 2; // Header + values
+
+const BALANCE_SHEET_NAME = 'Club Member Balance';
+
+/**
+ * Read the "Club Member Balance" rows, without the first 3 rows
+ */
+const getBalanceRows = (workbook: XLSX.WorkBook): unknown[][] => {
+  if (!workbook.SheetNames.includes(BALANCE_SHEET_NAME)) {
+    throw new Error(`Sheet "${BALANCE_SHEET_NAME}" not found in the uploaded file.`);
+  }
+  const jsonData: unknown[][] = XLSX.utils.sheet_to_json(workbook.Sheets[BALANCE_SHEET_NAME], {
+    header: 1,
+    defval: ''
+  });
+  return jsonData.slice(3);
+};
+
+/**
+ * Find the entered nickname matching a "Club Member Balance" row: column K must start
+ * with the nickname (case-insensitive prefix match)
+ */
+const findMatchingNickname = (row: unknown[], nicknames: NicknameWithLine[]): NicknameWithLine | undefined => {
+  const columnK = row[10] ? String(row[10]).toLowerCase() : '';
+  return nicknames.find(nicknameObj => columnK.startsWith(nicknameObj.nickname.toLowerCase()));
+};
+
+/**
+ * Find the entered nicknames that have no row in the "Club Member Balance" sheet.
+ * These players are added to the generated document with 0 chips.
+ */
+export const findPlayersMissingFromBalance = (
+  workbook: XLSX.WorkBook,
+  nicknames: NicknameWithLine[]
+): NicknameWithLine[] => {
+  const matched = new Set<NicknameWithLine>();
+  getBalanceRows(workbook).forEach(row => {
+    const match = findMatchingNickname(row, nicknames);
+    if (match) matched.add(match);
+  });
+  return nicknames.filter(n => !matched.has(n));
+};
+
 /**
  * Filter Excel workbook based on nicknames
  * - Only processes the "Club Member Balance" sheet
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
+ * - Players without a "Club Member Balance" row are added with 0 chips, shown as "Left Club?"
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L, plus rakeback)
+ * - Adds a stats table to the right of the main table ("Brutto Rake" = sum of all players' rake)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
@@ -147,20 +196,9 @@ export const filterWorkbookByNicknames = (
   memberStatistics: MemberStatistic[] = []
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
-  const targetSheetName = 'Club Member Balance';
+  const targetSheetName = BALANCE_SHEET_NAME;
 
-  // Check if the target sheet exists
-  if (!workbook.SheetNames.includes(targetSheetName)) {
-    throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
-  }
-
-  const worksheet = workbook.Sheets[targetSheetName];
-
-  // Convert sheet to JSON for easier processing
-  const jsonData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    defval: ''
-  });
+  const dataWithoutFirstThreeRows = getBalanceRows(workbook);
 
   // If no nicknames provided, return empty workbook
   if (nicknames.length === 0) {
@@ -168,9 +206,6 @@ export const filterWorkbookByNicknames = (
     XLSX.utils.book_append_sheet(newWorkbook, emptySheet, targetSheetName);
     return newWorkbook;
   }
-
-  // Remove first 3 rows
-  const dataWithoutFirstThreeRows = jsonData.slice(3);
 
   // Filter and keep only columns K (index 10) and L (index 11), plus add new columns
   const positiveData: any[][] = [];
@@ -188,46 +223,48 @@ export const filterWorkbookByNicknames = (
     return prefixMatch ? prefixMatch.rake : 0;
   };
 
-  dataWithoutFirstThreeRows.forEach((row) => {
-    const columnK = row[10] ? String(row[10]).toLowerCase() : '';
-    const columnL = row[11] !== undefined ? row[11] : 0;
+  const addPlayerRow = (displayName: unknown, columnL: unknown, matchingNickname: NicknameWithLine, chipsDisplay: unknown = columnL) => {
+    const hasLine = matchingNickname.line !== undefined;
+    const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
 
-    // Check if any nickname matches the start of column K (case-insensitive)
-    const matchingNickname = nicknames.find(nicknameObj =>
-      columnK.startsWith(nicknameObj.nickname.toLowerCase())
-    );
+    const rake = findRake(matchingNickname.nickname);
+    const rakeback = matchingNickname.rakeback !== undefined
+      ? Math.round(rake * matchingNickname.rakeback) / 100
+      : '';
 
-    if (matchingNickname) {
-      const hasLine = matchingNickname.line !== undefined;
-      const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
-
-      const rake = findRake(matchingNickname.nickname);
-      const rakeback = matchingNickname.rakeback !== undefined
-        ? Math.round(rake * matchingNickname.rakeback) / 100
-        : '';
-
-      // Calculate profit/loss
-      let profitLoss: number;
-      if (hasLine && matchingNickname.line !== undefined) {
-        profitLoss = Number(columnL) - matchingNickname.line;
-      } else {
-        profitLoss = Number(columnL);
-      }
-      // Rakeback is paid out to the player, so it adds to their profit
-      profitLoss += Number(rakeback || 0);
-
-      // Round down to integer (floor for positive, ceil for negative to round towards zero)
-      profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
-
-      const rowData = [row[10], lineAmount, columnL, rake, rakeback, profitLoss, '', '', '', '', ''];
-
-      // Split into positive and negative arrays
-      if (profitLoss >= 0) {
-        positiveData.push(rowData);
-      } else {
-        negativeData.push(rowData);
-      }
+    // Calculate profit/loss
+    let profitLoss: number;
+    if (hasLine && matchingNickname.line !== undefined) {
+      profitLoss = Number(columnL) - matchingNickname.line;
+    } else {
+      profitLoss = Number(columnL);
     }
+    // Rakeback is paid out to the player, so it adds to their profit
+    profitLoss += Number(rakeback || 0);
+
+    // Round down to integer (floor for positive, ceil for negative to round towards zero)
+    profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
+
+    const rowData = [displayName, lineAmount, chipsDisplay, rake, rakeback, profitLoss, '', '', '', '', ''];
+
+    // Split into positive and negative arrays
+    if (profitLoss >= 0) {
+      positiveData.push(rowData);
+    } else {
+      negativeData.push(rowData);
+    }
+  };
+
+  dataWithoutFirstThreeRows.forEach((row) => {
+    const matchingNickname = findMatchingNickname(row, nicknames);
+    if (matchingNickname) {
+      addPlayerRow(row[10], row[11] !== undefined ? row[11] : 0, matchingNickname);
+    }
+  });
+
+  // Players without a "Club Member Balance" row still need to settle their line and rakeback
+  findPlayersMissingFromBalance(workbook, nicknames).forEach(missing => {
+    addPlayerRow(missing.nickname, 0, missing, 'Left Club?');
   });
 
   // Sort both arrays by profit/loss (highest first)
@@ -260,7 +297,7 @@ export const filterWorkbookByNicknames = (
   ]);
   
   // Combine data with headers and spacing - 10 empty rows before transfer table
-  const combinedData = [
+  const combinedData: unknown[][] = [
     positiveHeaders,
     ...positiveData,
     [], // Empty row for spacing
@@ -280,6 +317,18 @@ export const filterWorkbookByNicknames = (
     transferTableHeader,
     ...transferTableRows
   ];
+
+  // Stats table to the right of the main table
+  const bruttoRake = [...positiveData, ...negativeData].reduce((sum, row) => sum + Number(row[3] || 0), 0);
+  const statsTable = [
+    ['Brutto Rake'],
+    [Math.round(bruttoRake * 100) / 100],
+  ];
+  statsTable.forEach((statsRow, i) => {
+    const row = combinedData[i];
+    while (row.length < STATS_TABLE_COLUMN_INDEX) row.push('');
+    row.push(...statsRow);
+  });
 
   // Create new worksheet from filtered data
   const newWorksheet = XLSX.utils.aoa_to_sheet(combinedData);
@@ -306,7 +355,8 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Main table column count. Can't be derived from the sheet data itself: sheet_to_json
   // pads every row out to the sheet's overall column range (21, from the always-present
   // transfer table header), so data[0].length is always 21.
-  const mainTableColumnCount = 11;
+  const mainTableColumnCount = MAIN_TABLE_COLUMN_COUNT;
+  const statsTableColumnNumber = STATS_TABLE_COLUMN_INDEX + 1; // ExcelJS columns are 1-based
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {
@@ -390,6 +440,24 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
       )) {
         cell.border = {};
         (cell as any).fill = null;
+      }
+      // Stats table to the right of the main table
+      else if (rowIndex < STATS_TABLE_ROW_COUNT && colNumber === statsTableColumnNumber) {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+
+        if (rowIndex === 0) {
+          cell.font = { bold: true, size: 12 };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E7FF' }
+          };
+        }
       }
       // Add borders to main table rows (only for columns 1-12)
       else if (!isSeparatorRow && !isTransferTableRow && colNumber <= mainTableColumnCount) {
