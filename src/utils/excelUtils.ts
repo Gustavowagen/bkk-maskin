@@ -22,38 +22,88 @@ export const readExcelFile = (file: File): Promise<XLSX.WorkBook> => {
   });
 };
 
+const normalizeHeader = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
 /**
- * Read name file and extract nickname to real name mapping
- * Looks for "Player overview" sheet with Nick and Name columns
+ * Find the nicknames of all active players in the "Member Statistics" sheet.
+ * - Locates the "Member" header cell (usually merged across Country/Role/ID/Nickname)
+ * - Locates the "Nickname" sub-header underneath it
+ * - Reads every nickname below that until the "TOTAL" row
  */
-export const readNameFile = async (file: File): Promise<Map<string, string>> => {
-  const workbook = await readExcelFile(file);
-  const targetSheetName = 'Player overview';
-  
-  // Check if the target sheet exists
-  if (!workbook.SheetNames.includes(targetSheetName)) {
-    throw new Error(`Sheet "${targetSheetName}" not found in the name file.`);
+export const extractActivePlayers = (workbook: XLSX.WorkBook): string[] => {
+  const targetSheetName = 'Member Statistics';
+  const sheetName = workbook.SheetNames.find(name => normalizeHeader(name) === normalizeHeader(targetSheetName));
+  if (!sheetName) {
+    throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
   }
-  
-  const worksheet = workbook.Sheets[targetSheetName];
-  
-  // Convert sheet to JSON with first row as headers
-  const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
-  
-  // Create mapping from Nick to Name
-  const nameMapping = new Map<string, string>();
-  
-  jsonData.forEach((row: any) => {
-    const nick = row['Nick'] || row['nick'] || row['NICK'];
-    const name = row['Name'] || row['name'] || row['NAME'];
-    
-    if (nick && name) {
-      // Store with lowercase key for case-insensitive lookup
-      nameMapping.set(String(nick).toLowerCase(), String(name));
+
+  const worksheet = workbook.Sheets[sheetName];
+  const range = XLSX.utils.decode_range(worksheet['!ref'] ?? 'A1');
+  const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', range });
+  // sheet_to_json indexes from the start of the range, so translate back to sheet coordinates
+  const cellAt = (r: number, c: number) => rows[r - range.s.r]?.[c - range.s.c];
+
+  // Find the "Member" header cell
+  let memberRow = -1;
+  let memberCol = -1;
+  for (let r = range.s.r; r <= range.e.r && memberRow === -1; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      if (normalizeHeader(cellAt(r, c)) === 'member') {
+        memberRow = r;
+        memberCol = c;
+        break;
+      }
     }
-  });
-  
-  return nameMapping;
+  }
+  if (memberRow === -1) {
+    throw new Error(`Could not find the "Member" column in the "${targetSheetName}" sheet.`);
+  }
+
+  // Determine which columns belong to "Member": use its merge range, otherwise
+  // extend right until the next non-empty header in the same row
+  const merge = (worksheet['!merges'] ?? []).find(m =>
+    m.s.r <= memberRow && memberRow <= m.e.r && m.s.c <= memberCol && memberCol <= m.e.c
+  );
+  let memberEndCol = merge ? merge.e.c : memberCol;
+  if (!merge) {
+    while (memberEndCol + 1 <= range.e.c && normalizeHeader(cellAt(memberRow, memberEndCol + 1)) === '') {
+      memberEndCol++;
+    }
+  }
+
+  // Find the "Nickname" sub-header under "Member"
+  let nicknameRow = -1;
+  let nicknameCol = -1;
+  for (let r = memberRow + 1; r <= Math.min(memberRow + 5, range.e.r) && nicknameRow === -1; r++) {
+    for (let c = memberCol; c <= memberEndCol; c++) {
+      if (normalizeHeader(cellAt(r, c)) === 'nickname') {
+        nicknameRow = r;
+        nicknameCol = c;
+        break;
+      }
+    }
+  }
+  if (nicknameRow === -1) {
+    throw new Error(`Could not find the "Nickname" column under "Member" in the "${targetSheetName}" sheet.`);
+  }
+
+  const players: string[] = [];
+  const seen = new Set<string>();
+  for (let r = nicknameRow + 1; r <= range.e.r; r++) {
+    const row = rows[r - range.s.r] ?? [];
+    if (row.some(cell => normalizeHeader(cell) === 'total')) break;
+
+    const nickname = String(cellAt(r, nicknameCol) ?? '').trim();
+    if (!nickname || nickname === '-') continue;
+
+    const key = nickname.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      players.push(nickname);
+    }
+  }
+
+  return players;
 };
 
 /**
@@ -62,14 +112,12 @@ export const readNameFile = async (file: File): Promise<Map<string, string>> => 
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
- * - Adds "Name" column with real name from nameMapping
  * - Adds "Has Line" column (Yes/No)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
-  nicknames: NicknameWithLine[],
-  nameMapping: Map<string, string>
+  nicknames: NicknameWithLine[]
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = 'Club Member Balance';
@@ -101,7 +149,7 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
 
-  const profitLossIndex = 5;
+  const profitLossIndex = 4;
 
   dataWithoutFirstThreeRows.forEach((row) => {
     const columnK = row[10] ? String(row[10]).toLowerCase() : '';
@@ -128,15 +176,7 @@ export const filterWorkbookByNicknames = (
       // Round down to integer (floor for positive, ceil for negative to round towards zero)
       profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
-      // The actual nickname from the Excel file (column K)
-      const actualNickname = String(row[10]);
-
-      // Get real name from mapping (case-insensitive lookup)
-      // Try both the actual nickname from Excel and the user-entered nickname
-      const realName = nameMapping.get(actualNickname.toLowerCase()) ||
-                       nameMapping.get(matchingNickname.nickname.toLowerCase()) || '';
-
-      const rowData = [row[10], realName, lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
+      const rowData = [row[10], lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
 
       // Split into positive and negative arrays
       if (profitLoss >= 0) {
@@ -152,8 +192,8 @@ export const filterWorkbookByNicknames = (
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
 
   // Add headers for main tables
-  const positiveHeaders = ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
@@ -223,7 +263,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Main table column count. Can't be derived from the sheet data itself: sheet_to_json
   // pads every row out to the sheet's overall column range (21, from the always-present
   // transfer table header), so data[0].length is always 21.
-  const mainTableColumnCount = 11;
+  const mainTableColumnCount = 10;
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {
