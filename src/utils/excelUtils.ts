@@ -133,8 +133,11 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
 
 // Number of columns in the main (positive/negative) tables
 const MAIN_TABLE_COLUMN_COUNT = 11;
-// The stats table sits to the right of the main table, with one empty column in between
-const STATS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
+// The owners table sits to the right of the main table, with one empty column in between
+const OWNERS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
+const OWNERS_TABLE_HEADERS = ['Nickname', 'Line', 'Chips', 'Rake', 'Profit/Loss', 'Rake share', 'Ny Saldo', 'uttak sum', 'ruller', 'claima chips', 'satt opp'];
+// The stats table sits to the right of the owners table, with one empty column in between
+const STATS_TABLE_COLUMN_INDEX = OWNERS_TABLE_COLUMN_INDEX + OWNERS_TABLE_HEADERS.length + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
 const STATS_TABLE_COLUMN_COUNT = 2; // Brutto Rake, Netto Rake
 
@@ -189,8 +192,10 @@ export const findPlayersMissingFromBalance = (
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L, plus rakeback)
- * - Adds a stats table to the right of the main table ("Brutto Rake" = sum of all players' rake,
- *   "Netto Rake" = Brutto Rake - sum of all players' rakeback)
+ * - Owners are left out of the main table and put in an owners table to the right of it
+ *   ("Rake share" = Netto Rake / number of owners, "Ny Saldo" = Profit/Loss + Rake share)
+ * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
+ *   "Netto Rake" = Brutto Rake - sum of all players' rakeback, both including owners)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
@@ -212,6 +217,9 @@ export const filterWorkbookByNicknames = (
   // Filter and keep only columns K (index 10) and L (index 11), plus add new columns
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
+  const ownerData: unknown[][] = [];
+  let bruttoRake = 0;
+  let totalRakeback = 0;
 
   const profitLossIndex = 5;
 
@@ -247,6 +255,15 @@ export const filterWorkbookByNicknames = (
     // Round down to integer (floor for positive, ceil for negative to round towards zero)
     profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
+    bruttoRake += rake;
+    totalRakeback += Number(rakeback || 0);
+
+    if (matchingNickname.owner) {
+      // Rake share and Ny Saldo are filled in once the netto rake is known
+      ownerData.push([displayName, lineAmount, chipsDisplay, rake, profitLoss, '', '', '', '', '', '']);
+      return;
+    }
+
     const rowData = [displayName, lineAmount, chipsDisplay, rake, rakeback, profitLoss, '', '', '', '', ''];
 
     // Split into positive and negative arrays
@@ -272,6 +289,8 @@ export const filterWorkbookByNicknames = (
   // Sort both arrays by profit/loss (highest first)
   positiveData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
+  const ownerProfitLossIndex = 4;
+  ownerData.sort((a, b) => Number(b[ownerProfitLossIndex]) - Number(a[ownerProfitLossIndex]));
 
   // Add headers for main tables
   const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
@@ -320,11 +339,21 @@ export const filterWorkbookByNicknames = (
     ...transferTableRows
   ];
 
-  // Stats table to the right of the main table
-  const allPlayerRows = [...positiveData, ...negativeData];
-  const bruttoRake = allPlayerRows.reduce((sum, row) => sum + Number(row[3] || 0), 0);
-  const totalRakeback = allPlayerRows.reduce((sum, row) => sum + Number(row[4] || 0), 0);
   const nettoRake = bruttoRake - totalRakeback;
+
+  // Owners table to the right of the main table: the netto rake is split evenly between the owners
+  const rakeShare = ownerData.length > 0 ? Math.round((nettoRake / ownerData.length) * 100) / 100 : 0;
+  ownerData.forEach(row => {
+    row[5] = rakeShare;
+    row[6] = Math.round((Number(row[ownerProfitLossIndex]) + rakeShare) * 100) / 100;
+  });
+  [OWNERS_TABLE_HEADERS, ...ownerData].forEach((ownerRow, i) => {
+    const row = combinedData[i];
+    while (row.length < OWNERS_TABLE_COLUMN_INDEX) row.push('');
+    row.push(...ownerRow);
+  });
+
+  // Stats table to the right of the owners table
   const statsTable = [
     ['Brutto Rake', 'Netto Rake'],
     [Math.round(bruttoRake * 100) / 100, Math.round(nettoRake * 100) / 100],
@@ -362,6 +391,12 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // transfer table header), so data[0].length is always 21.
   const mainTableColumnCount = MAIN_TABLE_COLUMN_COUNT;
   const statsTableColumnNumber = STATS_TABLE_COLUMN_INDEX + 1; // ExcelJS columns are 1-based
+  const ownersTableColumnNumber = OWNERS_TABLE_COLUMN_INDEX + 1;
+  // Owners table: header + one row per owner, starting at the top
+  let ownersTableRowCount = 0;
+  while (ownersTableRowCount < data.length && data[ownersTableRowCount][OWNERS_TABLE_COLUMN_INDEX] !== '') {
+    ownersTableRowCount++;
+  }
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {
@@ -446,7 +481,29 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
         cell.border = {};
         (cell as any).fill = null;
       }
-      // Stats table to the right of the main table
+      // Owners table to the right of the main table
+      else if (
+        rowIndex < ownersTableRowCount &&
+        colNumber >= ownersTableColumnNumber &&
+        colNumber < ownersTableColumnNumber + OWNERS_TABLE_HEADERS.length
+      ) {
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+
+        if (rowIndex === 0) {
+          cell.font = { bold: true, size: 12 };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E7FF' }
+          };
+        }
+      }
+      // Stats table to the right of the owners table
       else if (
         rowIndex < STATS_TABLE_ROW_COUNT &&
         colNumber >= statsTableColumnNumber &&
