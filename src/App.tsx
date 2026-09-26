@@ -8,6 +8,16 @@ import { readExcelFile, extractMemberStatistics, findPlayersMissingFromBalance, 
 import type { MemberStatistic } from './utils/excelUtils'
 import type { NicknameWithLine } from './types'
 
+/**
+ * Parse the "Ekstra utgifter" field. Empty counts as 0; "," or "." may be used as decimal separator.
+ * Returns undefined if the text is not a valid number.
+ */
+const parseExtraExpenses = (text: string): number | undefined => {
+  const trimmed = text.trim()
+  if (trimmed === '') return 0
+  if (!/^-?\d+([.,]\d+)?$/.test(trimmed)) return undefined
+  return Number(trimmed.replace(',', '.'))
+}
 
 function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -17,6 +27,9 @@ function App() {
   const [isFiltered, setIsFiltered] = useState(false)
   const [nicknames, setNicknames] = useState<NicknameWithLine[]>([])
   const [memberStatistics, setMemberStatistics] = useState<MemberStatistic[]>([])
+  const [extraExpensesText, setExtraExpensesText] = useState('')
+
+  const extraExpenses = parseExtraExpenses(extraExpensesText)
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
@@ -42,6 +55,7 @@ function App() {
     setFile(uploadedFile)
     setIsFiltered(false)
     setFilteredWorkbook(null)
+    setExtraExpensesText('')
 
     let wb: XLSX.WorkBook
     try {
@@ -66,12 +80,12 @@ function App() {
   }
 
   const handleFilter = () => {
-    if (!workbook) return
+    if (!workbook || extraExpenses === undefined) return
 
     setIsProcessing(true)
 
     try {
-      const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics)
+      const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics, extraExpenses)
       setFilteredWorkbook(filtered)
       setIsFiltered(true)
     } catch (error) {
@@ -108,12 +122,15 @@ function App() {
               key={file ? `${file.name}-${file.lastModified}` : undefined}
               nicknames={nicknames} 
               onNicknamesChange={setNicknames} 
+              extraExpensesText={extraExpensesText}
+              onExtraExpensesTextChange={setExtraExpensesText}
+              extraExpensesInvalid={extraExpenses === undefined}
             />
 
             <button 
               className="filter-button"
               onClick={handleFilter}
-              disabled={isProcessing}
+              disabled={isProcessing || extraExpenses === undefined}
             >
               {isProcessing ? 'Filtering...' : 'Filter'}
             </button>

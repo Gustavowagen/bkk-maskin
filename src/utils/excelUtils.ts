@@ -139,7 +139,7 @@ const OWNERS_TABLE_HEADERS = ['Nickname', 'Line', 'Chips', 'Rake', 'Profit/Loss'
 // The stats table sits to the right of the owners table, with one empty column in between
 const STATS_TABLE_COLUMN_INDEX = OWNERS_TABLE_COLUMN_INDEX + OWNERS_TABLE_HEADERS.length + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
-const STATS_TABLE_COLUMN_COUNT = 2; // Brutto Rake, Netto Rake
+const STATS_TABLE_COLUMN_COUNT = 3; // Brutto Rake, Netto Rake, Ekstra utgifter
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
@@ -195,12 +195,14 @@ export const findPlayersMissingFromBalance = (
  * - Owners are left out of the main table and put in an owners table to the right of it
  *   ("Rake share" = Netto Rake / number of owners, "Ny Saldo" = Profit/Loss + Rake share)
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
- *   "Netto Rake" = Brutto Rake - sum of all players' rakeback, both including owners)
+ *   "Netto Rake" = Brutto Rake - sum of all players' rakeback - extra expenses, both including owners,
+ *   "Ekstra utgifter" = other club expenses entered by the user)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
   nicknames: NicknameWithLine[],
-  memberStatistics: MemberStatistic[] = []
+  memberStatistics: MemberStatistic[] = [],
+  extraExpenses = 0
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = BALANCE_SHEET_NAME;
@@ -339,7 +341,7 @@ export const filterWorkbookByNicknames = (
     ...transferTableRows
   ];
 
-  const nettoRake = bruttoRake - totalRakeback;
+  const nettoRake = bruttoRake - totalRakeback - extraExpenses;
 
   // Owners table to the right of the main table: the netto rake is split evenly between the owners
   const rakeShare = ownerData.length > 0 ? Math.round((nettoRake / ownerData.length) * 100) / 100 : 0;
@@ -355,8 +357,8 @@ export const filterWorkbookByNicknames = (
 
   // Stats table to the right of the owners table
   const statsTable = [
-    ['Brutto Rake', 'Netto Rake'],
-    [Math.round(bruttoRake * 100) / 100, Math.round(nettoRake * 100) / 100],
+    ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter'],
+    [Math.round(bruttoRake * 100) / 100, Math.round(nettoRake * 100) / 100, Math.round(extraExpenses * 100) / 100],
   ];
   statsTable.forEach((statsRow, i) => {
     const row = combinedData[i];

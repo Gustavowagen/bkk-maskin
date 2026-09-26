@@ -205,3 +205,35 @@
     padding: 0.4rem 0.45rem;
   }
 }
+
+.extra-expenses {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 2px solid #e5e7eb;
+}
+
+.extra-expenses-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  margin-bottom: 0.3rem;
+}
+
+.extra-expenses-input {
+  max-width: 12rem;
+}
+
+.player-input-invalid,
+.player-input-invalid:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.extra-expenses-error {
+  color: #ef4444;
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+}

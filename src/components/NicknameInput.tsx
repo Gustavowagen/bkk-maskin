@@ -5,6 +5,9 @@ import './NicknameInput.css';
 interface NicknameInputProps {
   nicknames: NicknameWithLine[];
   onNicknamesChange: (nicknames: NicknameWithLine[]) => void;
+  extraExpensesText: string;
+  onExtraExpensesTextChange: (text: string) => void;
+  extraExpensesInvalid: boolean;
 }
 
 /**
@@ -57,7 +60,13 @@ const rowsToNicknames = (rows: PlayerRow[]): NicknameWithLine[] =>
       };
     });
 
-const NicknameInput: React.FC<NicknameInputProps> = ({ nicknames, onNicknamesChange }) => {
+const NicknameInput: React.FC<NicknameInputProps> = ({
+  nicknames,
+  onNicknamesChange,
+  extraExpensesText,
+  onExtraExpensesTextChange,
+  extraExpensesInvalid,
+}) => {
   const [rows, setRows] = useState<PlayerRow[]>(() => nicknames.map(toRow));
 
   const updateRows = (newRows: PlayerRow[]) => {
@@ -166,6 +175,26 @@ const NicknameInput: React.FC<NicknameInputProps> = ({ nicknames, onNicknamesCha
           </p>
         </div>
       )}
+
+      <div className="extra-expenses">
+        <label htmlFor="extra-expenses-input" className="extra-expenses-label">Ekstra utgifter</label>
+        <p className="nickname-hint">
+          Other club expenses in chips. Subtracted from the netto rake.
+        </p>
+        <input
+          id="extra-expenses-input"
+          type="text"
+          inputMode="decimal"
+          className={`player-input player-input-number extra-expenses-input${extraExpensesInvalid ? ' player-input-invalid' : ''}`}
+          value={extraExpensesText}
+          onChange={e => onExtraExpensesTextChange(e.target.value)}
+          placeholder="0"
+          aria-invalid={extraExpensesInvalid}
+        />
+        {extraExpensesInvalid && (
+          <p className="extra-expenses-error">Must be a number (e.g. <code>1500</code> or <code>1500,5</code>).</p>
+        )}
+      </div>
     </div>
   );
 };
