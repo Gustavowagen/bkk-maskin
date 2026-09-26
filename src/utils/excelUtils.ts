@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { NicknameWithLine, Club } from '../types';
+import type { NicknameWithLine } from '../types';
 
 /**
  * Read an Excel file and return a workbook
@@ -57,47 +57,19 @@ export const readNameFile = async (file: File): Promise<Map<string, string>> => 
 };
 
 /**
- * Detect which club an uploaded context file belongs to, by reading a
- * fixed cell in the "Club Overview" sheet: row 6, column D, directly
- * under the "Club Name" sub-header (see images/sepparator.png for the
- * reference layout — same 5-row header block pattern as "Club Member
- * Balance").
- */
-export const detectClub = (workbook: XLSX.WorkBook): Club => {
-  const sheetName = 'Club Overview';
-
-  if (!workbook.SheetNames.includes(sheetName)) {
-    throw new Error(`Sheet "${sheetName}" not found in the uploaded file.`);
-  }
-
-  const worksheet = workbook.Sheets[sheetName];
-  const data: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-  const raw = data[5]?.[3];
-  const name = String(raw ?? '').trim().toLowerCase();
-
-  if (name === 'knekt kortklubb') return 'knekt';
-  if (name === 'stvg kortklubb') return 'stvg';
-
-  throw new Error(`Unrecognized club "${String(raw ?? '')}" in Club Overview sheet.`);
-};
-
-/**
  * Filter Excel workbook based on nicknames
  * - Only processes the "Club Member Balance" sheet
  * - Removes first 3 rows
  * - Keeps only columns K and L
  * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
- * - For club 'knekt': adds "Name" column with real name from nameMapping
- * - For club 'stvg': omits the "Name" column entirely and never looks up nameMapping
+ * - Adds "Name" column with real name from nameMapping
  * - Adds "Has Line" column (Yes/No)
  * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
   nicknames: NicknameWithLine[],
-  nameMapping: Map<string, string>,
-  club: Club
+  nameMapping: Map<string, string>
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = 'Club Member Balance';
@@ -129,8 +101,7 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
 
-  // Profit/Loss lives one column earlier for Stvg since the Name column is omitted.
-  const profitLossIndex = club === 'stvg' ? 4 : 5;
+  const profitLossIndex = 5;
 
   dataWithoutFirstThreeRows.forEach((row) => {
     const columnK = row[10] ? String(row[10]).toLowerCase() : '';
@@ -157,20 +128,15 @@ export const filterWorkbookByNicknames = (
       // Round down to integer (floor for positive, ceil for negative to round towards zero)
       profitLoss = profitLoss >= 0 ? Math.floor(profitLoss) : Math.ceil(profitLoss);
 
-      let rowData: any[];
-      if (club === 'stvg') {
-        rowData = [row[10], lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
-      } else {
-        // The actual nickname from the Excel file (column K)
-        const actualNickname = String(row[10]);
+      // The actual nickname from the Excel file (column K)
+      const actualNickname = String(row[10]);
 
-        // Get real name from mapping (case-insensitive lookup)
-        // Try both the actual nickname from Excel and the user-entered nickname
-        const realName = nameMapping.get(actualNickname.toLowerCase()) ||
-                         nameMapping.get(matchingNickname.nickname.toLowerCase()) || '';
+      // Get real name from mapping (case-insensitive lookup)
+      // Try both the actual nickname from Excel and the user-entered nickname
+      const realName = nameMapping.get(actualNickname.toLowerCase()) ||
+                       nameMapping.get(matchingNickname.nickname.toLowerCase()) || '';
 
-        rowData = [row[10], realName, lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
-      }
+      const rowData = [row[10], realName, lineAmount, columnL, hasLineValue, profitLoss, '', '', '', '', ''];
 
       // Split into positive and negative arrays
       if (profitLoss >= 0) {
@@ -186,12 +152,8 @@ export const filterWorkbookByNicknames = (
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
 
   // Add headers for main tables
-  const positiveHeaders = club === 'stvg'
-    ? ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp']
-    : ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = club === 'stvg'
-    ? ['Nickname', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp']
-    : ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+  const positiveHeaders = ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = ['Nickname', 'Name', 'Linje', 'Chips', 'Has Line', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
@@ -246,7 +208,7 @@ export const filterWorkbookByNicknames = (
 /**
  * Generate and download Excel file with styling
  */
-export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string, club: Club): Promise<void> => {
+export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
   // Create a new ExcelJS workbook
   const excelWorkbook = new ExcelJS.Workbook();
   
@@ -258,12 +220,10 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   // Add worksheet to ExcelJS workbook
   const excelWorksheet = excelWorkbook.addWorksheet(sheetName);
   
-  // Main table column count varies by club (11 for Knekt with Name, 10 for Stvg without).
-  // Can't be derived from the sheet data itself: sheet_to_json pads every row out to the
-  // sheet's overall column range (21, from the always-present transfer table header), so
-  // data[0].length is always 21 regardless of club — the actual count must come from the
-  // caller, which already knows it (filterWorkbookByNicknames branches on the same club).
-  const mainTableColumnCount = club === 'stvg' ? 10 : 11;
+  // Main table column count. Can't be derived from the sheet data itself: sheet_to_json
+  // pads every row out to the sheet's overall column range (21, from the always-present
+  // transfer table header), so data[0].length is always 21.
+  const mainTableColumnCount = 11;
 
   // Add data to worksheet
   data.forEach((row, rowIndex) => {

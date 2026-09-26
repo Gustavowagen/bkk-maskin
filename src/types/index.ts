@@ -3,8 +3,6 @@ export interface NicknameWithLine {
   line?: number; // Optional line value
 }
 
-export type Club = 'knekt' | 'stvg';
-
 export interface AppState {
   file: File | null;
   workbook: any | null; // XLSX.WorkBook

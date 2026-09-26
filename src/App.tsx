@@ -4,8 +4,8 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile, detectClub } from './utils/excelUtils'
-import type { NicknameWithLine, Club } from './types'
+import { readExcelFile, readNameFile, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import type { NicknameWithLine } from './types'
 
 
 function App() {
@@ -16,7 +16,6 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isFiltered, setIsFiltered] = useState(false)
   const [nicknames, setNicknames] = useState<NicknameWithLine[]>([])
-  const [club, setClub] = useState<Club | null>(null)
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
@@ -50,13 +49,10 @@ function App() {
     setFile(uploadedFile)
     setIsFiltered(false)
     setFilteredWorkbook(null)
-    setClub(null)
 
     try {
       const wb = await readExcelFile(uploadedFile)
-      const detectedClub = detectClub(wb)
       setWorkbook(wb)
-      setClub(detectedClub)
     } catch (error) {
       console.error('Error reading file:', error)
       alert(error instanceof Error ? error.message : 'Error reading Excel file. Please make sure it is a valid Excel file.')
@@ -64,13 +60,13 @@ function App() {
   }
 
   const handleFilter = () => {
-    if (!workbook || !club) return
+    if (!workbook) return
 
     setIsProcessing(true)
 
     try {
       // Apply filtering logic with name mapping
-      const filtered = filterWorkbookByNicknames(workbook, nicknames, nameMapping, club)
+      const filtered = filterWorkbookByNicknames(workbook, nicknames, nameMapping)
       setFilteredWorkbook(filtered)
       setIsFiltered(true)
     } catch (error) {
@@ -82,10 +78,10 @@ function App() {
   }
 
   const handleDownload = async () => {
-    if (!filteredWorkbook || !club) return
+    if (!filteredWorkbook) return
 
     const originalName = file?.name.replace(/\.xlsx?$/i, '') || 'filtered'
-    await downloadExcelFile(filteredWorkbook, `${originalName}_filtered.xlsx`, club)
+    await downloadExcelFile(filteredWorkbook, `${originalName}_filtered.xlsx`)
   }
 
   return (
@@ -101,13 +97,7 @@ function App() {
           id="context-file"
         />
 
-        {club && (
-          <p className="info-message">
-            Detected club: {club === 'stvg' ? 'Stvg Kortklubb' : 'Knekt Kortklubb'}
-          </p>
-        )}
-
-        {club && !isFiltered && (
+        {workbook && !isFiltered && (
           <>
             <NicknameInput 
               nicknames={nicknames} 
