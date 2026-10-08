@@ -134,7 +134,7 @@ const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => 
  * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
  *   the "Nickname" sub-header underneath it
  * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
- * - Reads every row below that until the "TOTAL" row
+ * - Reads every row below that until the "TOTAL" row, skipping players with 0 total rake
  */
 export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatistic[] => {
   const sheet = createSheetReader(workbook, 'Member Statistics');
@@ -147,10 +147,14 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
     const nickname = String(sheet.cellAt(r, nicknameHeader.col) ?? '').trim();
     if (!nickname || nickname === '-') return;
 
+    // Players without any rake did not play in the period, so they are not active
+    const rake = parseNumber(sheet.cellAt(r, rakeHeader.col));
+    if (rake === 0) return;
+
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake: parseNumber(sheet.cellAt(r, rakeHeader.col)) });
+      players.push({ nickname, rake });
     }
   });
 

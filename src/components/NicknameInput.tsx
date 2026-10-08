@@ -90,7 +90,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
     <div className="nickname-input-container">
       <h3>Active Players</h3>
       <p className="nickname-hint">
-        Players found in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional. Owners always get 100% rakeback.
+        Players with rake in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional. Owners always get 100% rakeback.
       </p>
 
       <table className="player-table">
