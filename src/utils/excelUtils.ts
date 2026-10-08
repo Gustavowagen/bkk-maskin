@@ -44,15 +44,15 @@ export interface MemberStatistic {
   rake: number;
 }
 
+interface HeaderPosition {
+  row: number;
+  col: number;
+}
+
 /**
- * Read the active players and their total rake from the "Member Statistics" sheet.
- * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
- *   the "Nickname" sub-header underneath it
- * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
- * - Reads every row below that until the "TOTAL" row
+ * Wraps a sheet so columns can be located by their header names instead of fixed column letters.
  */
-export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatistic[] => {
-  const targetSheetName = 'Member Statistics';
+const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => {
   const sheetName = workbook.SheetNames.find(name => normalizeHeader(name) === normalizeHeader(targetSheetName));
   if (!sheetName) {
     throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
@@ -63,70 +63,96 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
   const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', range });
   // sheet_to_json indexes from the start of the range, so translate back to sheet coordinates
   const cellAt = (r: number, c: number) => rows[r - range.s.r]?.[c - range.s.c];
+  const mergeAt = (r: number, c: number) => (worksheet['!merges'] ?? []).find(m =>
+    m.s.r <= r && r <= m.e.r && m.s.c <= c && c <= m.e.c
+  );
+
+  /**
+   * Find the first header cell with the given name, scanning top to bottom.
+   * Header cells can be merged vertically, so the returned row is the lowest row of the merge.
+   */
+  const findHeader = (header: string): HeaderPosition => {
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        if (normalizeHeader(cellAt(r, c)) === normalizeHeader(header)) {
+          const merge = mergeAt(r, c);
+          return { row: merge ? merge.e.r : r, col: c };
+        }
+      }
+    }
+    throw new Error(`Could not find the "${header}" column in the "${targetSheetName}" sheet.`);
+  };
 
   /**
    * Find a group header (e.g. "Member") and a sub-header beneath it (e.g. "Nickname").
    * Returns the sub-header's row and column.
    */
-  const findSubHeader = (groupHeader: string, subHeader: string): { row: number; col: number } => {
-    let groupRow = -1;
-    let groupCol = -1;
-    for (let r = range.s.r; r <= range.e.r && groupRow === -1; r++) {
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        if (normalizeHeader(cellAt(r, c)) === normalizeHeader(groupHeader)) {
-          groupRow = r;
-          groupCol = c;
-          break;
-        }
-      }
-    }
-    if (groupRow === -1) {
-      throw new Error(`Could not find the "${groupHeader}" column in the "${targetSheetName}" sheet.`);
-    }
+  const findSubHeader = (groupHeader: string, subHeader: string): HeaderPosition => {
+    const group = findHeader(groupHeader);
 
     // Determine which columns belong to the group: use its merge range, otherwise
     // extend right until the next non-empty header in the same row
-    const merge = (worksheet['!merges'] ?? []).find(m =>
-      m.s.r <= groupRow && groupRow <= m.e.r && m.s.c <= groupCol && groupCol <= m.e.c
-    );
-    let groupEndCol = merge ? merge.e.c : groupCol;
+    const merge = mergeAt(group.row, group.col);
+    let groupEndCol = merge ? merge.e.c : group.col;
     if (!merge) {
-      while (groupEndCol + 1 <= range.e.c && normalizeHeader(cellAt(groupRow, groupEndCol + 1)) === '') {
+      while (groupEndCol + 1 <= range.e.c && normalizeHeader(cellAt(group.row, groupEndCol + 1)) === '') {
         groupEndCol++;
       }
     }
 
-    const firstSubRow = merge ? merge.e.r + 1 : groupRow + 1;
+    const firstSubRow = group.row + 1;
     for (let r = firstSubRow; r <= Math.min(firstSubRow + 4, range.e.r); r++) {
-      for (let c = groupCol; c <= groupEndCol; c++) {
+      for (let c = group.col; c <= groupEndCol; c++) {
         if (normalizeHeader(cellAt(r, c)) === normalizeHeader(subHeader)) {
-          return { row: r, col: c };
+          const subMerge = mergeAt(r, c);
+          return { row: subMerge ? subMerge.e.r : r, col: c };
         }
       }
     }
     throw new Error(`Could not find the "${subHeader}" column under "${groupHeader}" in the "${targetSheetName}" sheet.`);
   };
 
-  const nicknameHeader = findSubHeader('Member', 'Nickname');
-  const rakeHeader = findSubHeader('Rake&Fee', 'Total');
-  // Header cells can be merged vertically, so data starts below the lowest header row
-  const firstDataRow = Math.max(nicknameHeader.row, rakeHeader.row) + 1;
+  /**
+   * Row numbers below the given headers, up to (not including) the "TOTAL" row
+   */
+  const dataRows = (...headers: HeaderPosition[]): number[] => {
+    const result: number[] = [];
+    const firstDataRow = Math.max(...headers.map(h => h.row)) + 1;
+    for (let r = firstDataRow; r <= range.e.r; r++) {
+      const row = rows[r - range.s.r] ?? [];
+      if (row.some(cell => normalizeHeader(cell) === 'total')) break;
+      result.push(r);
+    }
+    return result;
+  };
+
+  return { cellAt, findHeader, findSubHeader, dataRows };
+};
+
+/**
+ * Read the active players and their total rake from the "Member Statistics" sheet.
+ * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
+ *   the "Nickname" sub-header underneath it
+ * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
+ * - Reads every row below that until the "TOTAL" row
+ */
+export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatistic[] => {
+  const sheet = createSheetReader(workbook, 'Member Statistics');
+  const nicknameHeader = sheet.findSubHeader('Member', 'Nickname');
+  const rakeHeader = sheet.findSubHeader('Rake&Fee', 'Total');
 
   const players: MemberStatistic[] = [];
   const seen = new Set<string>();
-  for (let r = firstDataRow; r <= range.e.r; r++) {
-    const row = rows[r - range.s.r] ?? [];
-    if (row.some(cell => normalizeHeader(cell) === 'total')) break;
-
-    const nickname = String(cellAt(r, nicknameHeader.col) ?? '').trim();
-    if (!nickname || nickname === '-') continue;
+  sheet.dataRows(nicknameHeader, rakeHeader).forEach(r => {
+    const nickname = String(sheet.cellAt(r, nicknameHeader.col) ?? '').trim();
+    if (!nickname || nickname === '-') return;
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake: parseNumber(cellAt(r, rakeHeader.col)) });
+      players.push({ nickname, rake: parseNumber(sheet.cellAt(r, rakeHeader.col)) });
     }
-  }
+  });
 
   return players;
 };
@@ -143,27 +169,36 @@ const STATS_TABLE_COLUMN_COUNT = 3; // Brutto Rake, Netto Rake, Ekstra utgifter
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
+interface BalanceRow {
+  nickname: string;
+  chips: number;
+}
+
 /**
- * Read the "Club Member Balance" rows, without the first 3 rows
+ * Read nickname and chips for every member in the "Club Member Balance" sheet.
+ * - Nickname: the "Nickname" sub-header under the "Member" header
+ * - Chips: the "Chips" header
  */
-const getBalanceRows = (workbook: XLSX.WorkBook): unknown[][] => {
-  if (!workbook.SheetNames.includes(BALANCE_SHEET_NAME)) {
-    throw new Error(`Sheet "${BALANCE_SHEET_NAME}" not found in the uploaded file.`);
-  }
-  const jsonData: unknown[][] = XLSX.utils.sheet_to_json(workbook.Sheets[BALANCE_SHEET_NAME], {
-    header: 1,
-    defval: ''
-  });
-  return jsonData.slice(3);
+const getBalanceRows = (workbook: XLSX.WorkBook): BalanceRow[] => {
+  const sheet = createSheetReader(workbook, BALANCE_SHEET_NAME);
+  const nicknameHeader = sheet.findSubHeader('Member', 'Nickname');
+  const chipsHeader = sheet.findHeader('Chips');
+
+  return sheet.dataRows(nicknameHeader, chipsHeader)
+    .map(r => ({
+      nickname: String(sheet.cellAt(r, nicknameHeader.col) ?? '').trim(),
+      chips: parseNumber(sheet.cellAt(r, chipsHeader.col)),
+    }))
+    .filter(row => row.nickname && row.nickname !== '-');
 };
 
 /**
- * Find the entered nickname matching a "Club Member Balance" row: column K must start
- * with the nickname (case-insensitive prefix match)
+ * Find the entered nickname matching a "Club Member Balance" row: the member's nickname
+ * must start with the entered nickname (case-insensitive prefix match)
  */
-const findMatchingNickname = (row: unknown[], nicknames: NicknameWithLine[]): NicknameWithLine | undefined => {
-  const columnK = row[10] ? String(row[10]).toLowerCase() : '';
-  return nicknames.find(nicknameObj => columnK.startsWith(nicknameObj.nickname.toLowerCase()));
+const findMatchingNickname = (row: BalanceRow, nicknames: NicknameWithLine[]): NicknameWithLine | undefined => {
+  const memberNickname = row.nickname.toLowerCase();
+  return nicknames.find(nicknameObj => memberNickname.startsWith(nicknameObj.nickname.toLowerCase()));
 };
 
 /**
@@ -185,13 +220,12 @@ export const findPlayersMissingFromBalance = (
 /**
  * Filter Excel workbook based on nicknames
  * - Only processes the "Club Member Balance" sheet
- * - Removes first 3 rows
- * - Keeps only columns K and L
- * - Filters rows where column K starts with any of the provided nicknames (case-insensitive prefix match)
+ * - Reads the member nickname and chips columns (located by their headers)
+ * - Filters rows where the nickname starts with any of the provided nicknames (case-insensitive prefix match)
  * - Players without a "Club Member Balance" row are added with 0 chips, shown as "Left Club?"
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
  * - Adds "Rakeback" column (rake * rakeback %)
- * - Adds "Profit/Loss" column (L - line if line exists, otherwise just L, plus rakeback)
+ * - Adds "Profit/Loss" column (chips - line if line exists, otherwise just chips, plus rakeback)
  * - Owners are left out of the main table and put in an owners table to the right of it
  *   ("Rake share" = Netto Rake / number of owners, "Ny Saldo" = Profit/Loss + Rake share)
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
@@ -207,7 +241,7 @@ export const filterWorkbookByNicknames = (
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = BALANCE_SHEET_NAME;
 
-  const dataWithoutFirstThreeRows = getBalanceRows(workbook);
+  const balanceRows = getBalanceRows(workbook);
 
   // If no nicknames provided, return empty workbook
   if (nicknames.length === 0) {
@@ -216,7 +250,6 @@ export const filterWorkbookByNicknames = (
     return newWorkbook;
   }
 
-  // Filter and keep only columns K (index 10) and L (index 11), plus add new columns
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
   const ownerData: unknown[][] = [];
@@ -235,7 +268,7 @@ export const filterWorkbookByNicknames = (
     return prefixMatch ? prefixMatch.rake : 0;
   };
 
-  const addPlayerRow = (displayName: unknown, columnL: unknown, matchingNickname: NicknameWithLine, chipsDisplay: unknown = columnL) => {
+  const addPlayerRow = (displayName: string, chips: number, matchingNickname: NicknameWithLine, chipsDisplay: unknown = chips) => {
     const hasLine = matchingNickname.line !== undefined;
     const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
 
@@ -247,9 +280,9 @@ export const filterWorkbookByNicknames = (
     // Calculate profit/loss
     let profitLoss: number;
     if (hasLine && matchingNickname.line !== undefined) {
-      profitLoss = Number(columnL) - matchingNickname.line;
+      profitLoss = chips - matchingNickname.line;
     } else {
-      profitLoss = Number(columnL);
+      profitLoss = chips;
     }
     // Rakeback is paid out to the player, so it adds to their profit
     profitLoss += Number(rakeback || 0);
@@ -276,10 +309,10 @@ export const filterWorkbookByNicknames = (
     }
   };
 
-  dataWithoutFirstThreeRows.forEach((row) => {
+  balanceRows.forEach((row) => {
     const matchingNickname = findMatchingNickname(row, nicknames);
     if (matchingNickname) {
-      addPlayerRow(row[10], row[11] !== undefined ? row[11] : 0, matchingNickname);
+      addPlayerRow(row.nickname, row.chips, matchingNickname);
     }
   });
 
