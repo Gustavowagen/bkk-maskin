@@ -198,7 +198,7 @@ const OWNERS_TABLE_HEADERS = ['Nickname', 'Navn', 'Line', 'Chips', 'Rake', 'Prof
 // The stats table sits to the right of the owners table, with one empty column in between
 const STATS_TABLE_COLUMN_INDEX = OWNERS_TABLE_COLUMN_INDEX + OWNERS_TABLE_HEADERS.length + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
-const STATS_TABLE_HEADERS = ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter', 'Total agent RB'];
+const STATS_TABLE_HEADERS = ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter', 'Total RB', 'Total agent RB'];
 // Agent tables sit to the right of the stats table, side by side with one empty column in between.
 // Each table has the agent name above it, then the headers, one row per player, a total row and a rake share row.
 const AGENT_TABLES_COLUMN_INDEX = STATS_TABLE_COLUMN_INDEX + STATS_TABLE_HEADERS.length + 1;
@@ -277,6 +277,7 @@ export const findPlayersMissingFromBalance = (
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
  *   "Netto Rake" = Brutto Rake - sum of all players' rakeback - extra expenses - total agent rake share,
  *   both including owners and agent tables, "Ekstra utgifter" = other club expenses entered by the user,
+ *   "Total RB" = sum of all players' rakeback including owners but not agent tables,
  *   "Total agent RB" = sum of all agents' rake share)
  */
 export const filterWorkbookByNicknames = (
@@ -504,7 +505,7 @@ export const filterWorkbookByNicknames = (
   // Stats table to the right of the owners table
   placeTable([
     STATS_TABLE_HEADERS,
-    [round2(bruttoRake), round2(nettoRake), round2(extraExpenses), round2(totalAgentRakeback)],
+    [round2(bruttoRake), round2(nettoRake), round2(extraExpenses), round2(totalRakeback), round2(totalAgentRakeback)],
   ], STATS_TABLE_COLUMN_INDEX);
 
   // Agent tables to the right of the stats table
