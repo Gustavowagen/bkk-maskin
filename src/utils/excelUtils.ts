@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { NicknameWithLine } from '../types';
+import type { AgentInput, NicknameWithLine } from '../types';
+import { findRealName } from './playerNames';
 
 /**
  * Read an Excel file and return a workbook
@@ -42,6 +43,8 @@ const parseNumber = (value: unknown): number => {
 export interface MemberStatistic {
   nickname: string;
   rake: number;
+  profitLoss: number; // Total player P&L
+  agent: string; // Agent nickname, '' if the member has no agent
 }
 
 interface HeaderPosition {
@@ -129,17 +132,30 @@ const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => 
   return { cellAt, findHeader, findSubHeader, dataRows };
 };
 
+// Look up an optional column, returning undefined instead of throwing when it is missing
+const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined => {
+  try {
+    return find();
+  } catch {
+    return undefined;
+  }
+};
+
 /**
- * Read the active players and their total rake from the "Member Statistics" sheet.
+ * Read every member with their total rake, total P&L and agent from the "Member Statistics" sheet.
  * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
  *   the "Nickname" sub-header underneath it
  * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
- * - Reads every row below that until the "TOTAL" row, skipping players with 0 total rake
+ * - Locates the "Player P&L" → "Total" and "Agent" → "Nickname" columns (optional, 0 / '' if missing)
+ * - Reads every row below that until the "TOTAL" row. Members with 0 total rake are included;
+ *   use isActiveMember to keep only the players that played in the period.
  */
 export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatistic[] => {
   const sheet = createSheetReader(workbook, 'Member Statistics');
   const nicknameHeader = sheet.findSubHeader('Member', 'Nickname');
   const rakeHeader = sheet.findSubHeader('Rake&Fee', 'Total');
+  const profitLossHeader = tryFindHeader(() => sheet.findSubHeader('Player P&L', 'Total'));
+  const agentHeader = tryFindHeader(() => sheet.findSubHeader('Agent', 'Nickname'));
 
   const players: MemberStatistic[] = [];
   const seen = new Set<string>();
@@ -147,29 +163,49 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
     const nickname = String(sheet.cellAt(r, nicknameHeader.col) ?? '').trim();
     if (!nickname || nickname === '-') return;
 
-    // Players without any rake did not play in the period, so they are not active
     const rake = parseNumber(sheet.cellAt(r, rakeHeader.col));
-    if (rake === 0) return;
+    const profitLoss = profitLossHeader ? parseNumber(sheet.cellAt(r, profitLossHeader.col)) : 0;
+    const agentCell = agentHeader ? String(sheet.cellAt(r, agentHeader.col) ?? '').trim() : '';
+    const agent = agentCell === '-' ? '' : agentCell;
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake });
+      players.push({ nickname, rake, profitLoss, agent });
     }
   });
 
   return players;
 };
 
+// Players without any rake did not play in the period, so they are not active
+export const isActiveMember = (member: MemberStatistic): boolean => member.rake !== 0;
+
+const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Members in "Member Statistics" that belong to the agent: the agent himself and every member
+ * whose "Agent" → "Nickname" matches the agent name (case-insensitive)
+ */
+export const findAgentMembers = (memberStatistics: MemberStatistic[], agentName: string): MemberStatistic[] =>
+  memberStatistics.filter(m => sameName(m.nickname, agentName) || sameName(m.agent, agentName));
+
 // Number of columns in the main (positive/negative) tables
-const MAIN_TABLE_COLUMN_COUNT = 11;
+const MAIN_TABLE_COLUMN_COUNT = 12;
 // The owners table sits to the right of the main table, with one empty column in between
 const OWNERS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
-const OWNERS_TABLE_HEADERS = ['Nickname', 'Line', 'Chips', 'Rake', 'Profit/Loss', 'Rake share', 'Ny Saldo', 'uttak sum', 'ruller', 'claima chips', 'satt opp'];
+const OWNERS_TABLE_HEADERS = ['Nickname', 'Navn', 'Line', 'Chips', 'Rake', 'Profit/Loss', 'Rake share', 'Ny Saldo', 'uttak sum', 'ruller', 'claima chips', 'satt opp'];
 // The stats table sits to the right of the owners table, with one empty column in between
 const STATS_TABLE_COLUMN_INDEX = OWNERS_TABLE_COLUMN_INDEX + OWNERS_TABLE_HEADERS.length + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
-const STATS_TABLE_COLUMN_COUNT = 3; // Brutto Rake, Netto Rake, Ekstra utgifter
+const STATS_TABLE_HEADERS = ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter', 'Total agent RB'];
+// Agent tables sit to the right of the stats table, side by side with one empty column in between.
+// Each table has the agent name above it, then the headers, one row per player, a total row and a rake share row.
+const AGENT_TABLES_COLUMN_INDEX = STATS_TABLE_COLUMN_INDEX + STATS_TABLE_HEADERS.length + 1;
+const AGENT_TABLE_HEADERS = ['Nickname', 'Chips', 'Rake', 'Profit/Loss'];
+const AGENT_TABLE_STRIDE = AGENT_TABLE_HEADERS.length + 1;
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
@@ -227,20 +263,29 @@ export const findPlayersMissingFromBalance = (
  * - Reads the member nickname and chips columns (located by their headers)
  * - Filters rows where the nickname starts with any of the provided nicknames (case-insensitive prefix match)
  * - Players without a "Club Member Balance" row are added with 0 chips, shown as "Left Club?"
+ * - Adds "Navn" column (real name from the Google Sheet, blank if the nickname is not found)
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (chips - line if line exists, otherwise just chips, plus rakeback)
  * - Owners are left out of the main table and put in an owners table to the right of it
  *   ("Rake share" = Netto Rake / number of owners, "Ny Saldo" = Profit/Loss + Rake share)
+ * - Agents and players whose agent (in "Member Statistics") is one of the entered agents are left out
+ *   of the main and owners tables and put in a table per agent to the right of the stats table.
+ *   Their Profit/Loss is the total player P&L from "Member Statistics" (line and rakeback are ignored).
+ *   The agent is included even if he is not an active player, as long as he is in "Member Statistics".
+ *   "Rake share" = total rake of the agent table * the agent's rake %
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
- *   "Netto Rake" = Brutto Rake - sum of all players' rakeback - extra expenses, both including owners,
- *   "Ekstra utgifter" = other club expenses entered by the user)
+ *   "Netto Rake" = Brutto Rake - sum of all players' rakeback - extra expenses - total agent rake share,
+ *   both including owners and agent tables, "Ekstra utgifter" = other club expenses entered by the user,
+ *   "Total agent RB" = sum of all agents' rake share)
  */
 export const filterWorkbookByNicknames = (
   workbook: XLSX.WorkBook,
   nicknames: NicknameWithLine[],
   memberStatistics: MemberStatistic[] = [],
-  extraExpenses = 0
+  extraExpenses = 0,
+  realNames: Map<string, string> = new Map(),
+  agents: AgentInput[] = []
 ): XLSX.WorkBook => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = BALANCE_SHEET_NAME;
@@ -260,23 +305,53 @@ export const filterWorkbookByNicknames = (
   let bruttoRake = 0;
   let totalRakeback = 0;
 
-  const profitLossIndex = 5;
+  const profitLossIndex = 6;
 
-  const rakeByNickname = new Map(memberStatistics.map(m => [m.nickname.toLowerCase(), m.rake]));
+  const statByNickname = new Map(memberStatistics.map(m => [m.nickname.toLowerCase(), m]));
   // Entered nicknames normally match exactly, but fall back to prefix matching like the chips lookup does
-  const findRake = (nickname: string): number => {
+  // (preferring active players, since inactive members are in the statistics as well)
+  const findStat = (nickname: string): MemberStatistic | undefined => {
     const key = nickname.toLowerCase();
-    const exact = rakeByNickname.get(key);
+    const exact = statByNickname.get(key);
     if (exact !== undefined) return exact;
-    const prefixMatch = memberStatistics.find(m => m.nickname.toLowerCase().startsWith(key));
-    return prefixMatch ? prefixMatch.rake : 0;
+    const matchesPrefix = (m: MemberStatistic) => m.nickname.toLowerCase().startsWith(key);
+    return memberStatistics.find(m => matchesPrefix(m) && isActiveMember(m)) ?? memberStatistics.find(matchesPrefix);
+  };
+
+  interface AgentTableRow {
+    nickname: string;
+    chips: unknown;
+    rake: number;
+    profitLoss: number;
+    isAgent: boolean;
+  }
+  const findAgent = (name: string) => agents.find(agent => sameName(agent.name, name));
+  const agentRows = new Map<AgentInput, AgentTableRow[]>(agents.map(agent => [agent, []]));
+
+  /**
+   * Put the player in his agent's table if he is one of the entered agents or one of their players.
+   * Returns false if the player does not belong to any agent.
+   */
+  const addAgentTableRow = (displayName: string, chipsDisplay: unknown, stat: MemberStatistic | undefined, enteredNickname: string): boolean => {
+    const ownAgent = findAgent(displayName) ?? findAgent(enteredNickname) ?? (stat && findAgent(stat.nickname));
+    const agent = ownAgent ?? (stat?.agent ? findAgent(stat.agent) : undefined);
+    if (!agent) return false;
+
+    const rake = stat?.rake ?? 0;
+    bruttoRake += rake;
+    agentRows.get(agent)!.push({ nickname: displayName, chips: chipsDisplay, rake, profitLoss: stat?.profitLoss ?? 0, isAgent: !!ownAgent });
+    return true;
   };
 
   const addPlayerRow = (displayName: string, chips: number, matchingNickname: NicknameWithLine, chipsDisplay: unknown = chips) => {
+    const stat = findStat(matchingNickname.nickname);
+    if (addAgentTableRow(displayName, chipsDisplay, stat, matchingNickname.nickname)) return;
+
     const hasLine = matchingNickname.line !== undefined;
     const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
 
-    const rake = findRake(matchingNickname.nickname);
+    const realName = findRealName(realNames, displayName, matchingNickname.nickname);
+    const rake = stat?.rake ?? 0;
     const rakeback = matchingNickname.rakeback !== undefined
       ? Math.round(rake * matchingNickname.rakeback) / 100
       : '';
@@ -299,11 +374,11 @@ export const filterWorkbookByNicknames = (
 
     if (matchingNickname.owner) {
       // Rake share and Ny Saldo are filled in once the netto rake is known
-      ownerData.push([displayName, lineAmount, chipsDisplay, rake, profitLoss, '', '', '', '', '', '']);
+      ownerData.push([displayName, realName, lineAmount, chipsDisplay, rake, profitLoss, '', '', '', '', '', '']);
       return;
     }
 
-    const rowData = [displayName, lineAmount, chipsDisplay, rake, rakeback, profitLoss, '', '', '', '', ''];
+    const rowData = [displayName, realName, lineAmount, chipsDisplay, rake, rakeback, profitLoss, '', '', '', '', ''];
 
     // Split into positive and negative arrays
     if (profitLoss >= 0) {
@@ -325,15 +400,25 @@ export const filterWorkbookByNicknames = (
     addPlayerRow(missing.nickname, 0, missing, 'Left Club?');
   });
 
+  // Agents that are not active players are still included, as long as they are in "Member Statistics"
+  agentRows.forEach((rows, agent) => {
+    if (rows.some(row => row.isAgent)) return;
+    const stat = memberStatistics.find(m => sameName(m.nickname, agent.name));
+    if (!stat) return;
+    const balanceRow = balanceRows.find(row => sameName(row.nickname, stat.nickname))
+      ?? balanceRows.find(row => row.nickname.toLowerCase().startsWith(stat.nickname.toLowerCase()));
+    addAgentTableRow(balanceRow?.nickname ?? stat.nickname, balanceRow ? balanceRow.chips : 'Left Club?', stat, stat.nickname);
+  });
+
   // Sort both arrays by profit/loss (highest first)
   positiveData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
   negativeData.sort((a, b) => b[profitLossIndex] - a[profitLossIndex]);
-  const ownerProfitLossIndex = 4;
+  const ownerProfitLossIndex = 5;
   ownerData.sort((a, b) => Number(b[ownerProfitLossIndex]) - Number(a[ownerProfitLossIndex]));
 
   // Add headers for main tables
-  const positiveHeaders = ['Nickname', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
-  const negativeHeaders = ['Nickname', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
+  const positiveHeaders = ['Nickname', 'Navn', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Claima chips', 'satt opp'];
+  const negativeHeaders = ['Nickname', 'Navn', 'Linje', 'Chips', 'Rake', 'Rakeback', 'Profit/Loss', 'Pm', 'uttak sum', 'ruller', 'Gitt chips', 'satt opp'];
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
@@ -378,30 +463,52 @@ export const filterWorkbookByNicknames = (
     ...transferTableRows
   ];
 
-  const nettoRake = bruttoRake - totalRakeback - extraExpenses;
+  // Place a table at the top of the sheet, starting at the given column
+  const placeTable = (table: unknown[][], columnIndex: number) => {
+    table.forEach((tableRow, i) => {
+      while (combinedData.length <= i) combinedData.push([]);
+      const row = combinedData[i];
+      while (row.length < columnIndex) row.push('');
+      row.push(...tableRow);
+    });
+  };
+
+  // One table per agent: the agent first, then his players by profit/loss (highest first)
+  let totalAgentRakeback = 0;
+  const agentTables = agents.map(agent => {
+    const rows = agentRows.get(agent)!;
+    rows.sort((a, b) => Number(b.isAgent) - Number(a.isAgent) || b.profitLoss - a.profitLoss);
+    const totalRake = rows.reduce((sum, row) => sum + row.rake, 0);
+    const totalProfitLoss = rows.reduce((sum, row) => sum + row.profitLoss, 0);
+    const agentRakeShare = round2(totalRake * agent.rakeShare / 100);
+    totalAgentRakeback += agentRakeShare;
+    return [
+      [agent.name, '', '', ''],
+      AGENT_TABLE_HEADERS,
+      ...rows.map(row => [row.nickname, row.chips, round2(row.rake), round2(row.profitLoss)]),
+      ['Total', '', round2(totalRake), round2(totalProfitLoss)],
+      [`Rake share (${agent.rakeShare}%)`, '', agentRakeShare, ''],
+    ];
+  });
+
+  const nettoRake = bruttoRake - totalRakeback - extraExpenses - totalAgentRakeback;
 
   // Owners table to the right of the main table: the netto rake is split evenly between the owners
-  const rakeShare = ownerData.length > 0 ? Math.round((nettoRake / ownerData.length) * 100) / 100 : 0;
+  const rakeShare = ownerData.length > 0 ? round2(nettoRake / ownerData.length) : 0;
   ownerData.forEach(row => {
-    row[5] = rakeShare;
-    row[6] = Math.round((Number(row[ownerProfitLossIndex]) + rakeShare) * 100) / 100;
+    row[6] = rakeShare;
+    row[7] = round2(Number(row[ownerProfitLossIndex]) + rakeShare);
   });
-  [OWNERS_TABLE_HEADERS, ...ownerData].forEach((ownerRow, i) => {
-    const row = combinedData[i];
-    while (row.length < OWNERS_TABLE_COLUMN_INDEX) row.push('');
-    row.push(...ownerRow);
-  });
+  placeTable([OWNERS_TABLE_HEADERS, ...ownerData], OWNERS_TABLE_COLUMN_INDEX);
 
   // Stats table to the right of the owners table
-  const statsTable = [
-    ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter'],
-    [Math.round(bruttoRake * 100) / 100, Math.round(nettoRake * 100) / 100, Math.round(extraExpenses * 100) / 100],
-  ];
-  statsTable.forEach((statsRow, i) => {
-    const row = combinedData[i];
-    while (row.length < STATS_TABLE_COLUMN_INDEX) row.push('');
-    row.push(...statsRow);
-  });
+  placeTable([
+    STATS_TABLE_HEADERS,
+    [round2(bruttoRake), round2(nettoRake), round2(extraExpenses), round2(totalAgentRakeback)],
+  ], STATS_TABLE_COLUMN_INDEX);
+
+  // Agent tables to the right of the stats table
+  agentTables.forEach((table, i) => placeTable(table, AGENT_TABLES_COLUMN_INDEX + i * AGENT_TABLE_STRIDE));
 
   // Create new worksheet from filtered data
   const newWorksheet = XLSX.utils.aoa_to_sheet(combinedData);
@@ -435,6 +542,14 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   let ownersTableRowCount = 0;
   while (ownersTableRowCount < data.length && data[ownersTableRowCount][OWNERS_TABLE_COLUMN_INDEX] !== '') {
     ownersTableRowCount++;
+  }
+  // Agent tables: agent name + header + player rows + total + rake share, all with a non-empty first column
+  const cellText = (rowIndex: number, colIndex: number) => data[rowIndex]?.[colIndex] ?? '';
+  const agentTables: { columnNumber: number; rowCount: number }[] = [];
+  for (let col = AGENT_TABLES_COLUMN_INDEX; cellText(0, col) !== ''; col += AGENT_TABLE_STRIDE) {
+    let rowCount = 0;
+    while (rowCount < data.length && cellText(rowCount, col) !== '') rowCount++;
+    agentTables.push({ columnNumber: col + 1, rowCount });
   }
 
   // Add data to worksheet
@@ -482,7 +597,42 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
     // Process all cells in the row
     for (let colNumber = 1; colNumber <= Math.max(excelRow.cellCount, 20); colNumber++) {
       const cell = excelRow.getCell(colNumber);
-      
+
+      // Agent tables to the right of the stats table. Checked first, since they can be
+      // tall enough to reach the separator and transfer table rows.
+      const agentTable = agentTables.find(t =>
+        rowIndex < t.rowCount &&
+        colNumber >= t.columnNumber &&
+        colNumber < t.columnNumber + AGENT_TABLE_HEADERS.length
+      );
+      if (agentTable) {
+        if (rowIndex === 0) {
+          // Agent name above the table
+          cell.border = {};
+          cell.font = { bold: true, size: 14 };
+          cell.alignment = { horizontal: 'center' };
+          continue;
+        }
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+        if (rowIndex === 1) {
+          cell.font = { bold: true, size: 12 };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFE0E7FF' }
+          };
+        } else if (rowIndex >= agentTable.rowCount - 2) {
+          // Total and rake share rows
+          cell.font = { bold: true };
+        }
+        continue;
+      }
+
       // Remove borders and fill from the 2 separator rows before transfer table
       if (isSeparatorRow) {
         cell.border = {};
@@ -546,7 +696,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
       else if (
         rowIndex < STATS_TABLE_ROW_COUNT &&
         colNumber >= statsTableColumnNumber &&
-        colNumber < statsTableColumnNumber + STATS_TABLE_COLUMN_COUNT
+        colNumber < statsTableColumnNumber + STATS_TABLE_HEADERS.length
       ) {
         cell.border = {
           top: { style: 'thin' },
@@ -583,7 +733,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
           };
         }
       }
-      // Remove borders and fill for main table rows beyond column 11
+      // Remove borders and fill for main table rows beyond the main table
       else if (!isSeparatorRow && !isTransferTableRow && colNumber > mainTableColumnCount) {
         cell.border = {};
         (cell as any).fill = null;
@@ -591,16 +741,22 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
     }
   });
   
-  // Auto-fit columns based on content
+  // Auto-fit columns based on content (the merged agent names are left out, they span several columns)
   excelWorksheet.columns.forEach((column) => {
     let maxLength = 0;
-    column.eachCell?.({ includeEmpty: true }, (cell) => {
+    column.eachCell?.({ includeEmpty: true }, (cell, rowNumber) => {
+      if (rowNumber === 1 && agentTables.some(t => Number(column.number) === t.columnNumber)) return;
       const columnLength = cell.value ? String(cell.value).length : 10;
       if (columnLength > maxLength) {
         maxLength = columnLength;
       }
     });
     column.width = maxLength < 10 ? 10 : maxLength + 2;
+  });
+
+  // Center each agent name over its table
+  agentTables.forEach(t => {
+    excelWorksheet.mergeCells(1, t.columnNumber, 1, t.columnNumber + AGENT_TABLE_HEADERS.length - 1);
   });
   
   // Generate Excel file

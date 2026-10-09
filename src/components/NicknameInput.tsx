@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { NicknameWithLine } from '../types';
+import type { AgentRow, NicknameWithLine } from '../types';
 import './NicknameInput.css';
 
 interface NicknameInputProps {
@@ -8,6 +8,9 @@ interface NicknameInputProps {
   extraExpensesText: string;
   onExtraExpensesTextChange: (text: string) => void;
   extraExpensesInvalid: boolean;
+  agentRows: AgentRow[];
+  onAgentRowsChange: (rows: AgentRow[]) => void;
+  invalidAgentIds: Set<number>;
 }
 
 /**
@@ -66,6 +69,9 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
   extraExpensesText,
   onExtraExpensesTextChange,
   extraExpensesInvalid,
+  agentRows,
+  onAgentRowsChange,
+  invalidAgentIds,
 }) => {
   const [rows, setRows] = useState<PlayerRow[]>(() => nicknames.map(toRow));
 
@@ -84,6 +90,15 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
 
   const deleteRow = (id: number) => {
     updateRows(rows.filter(row => row.id !== id));
+  };
+
+  const updateAgentRow = (id: number, changes: Partial<AgentRow>) => {
+    onAgentRowsChange(agentRows.map(row => (row.id === id ? { ...row, ...changes } : row)));
+  };
+
+  const addAgentRow = () => {
+    const id = agentRows.reduce((max, row) => Math.max(max, row.id), -1) + 1;
+    onAgentRowsChange([...agentRows, { id, name: '', rakeShareText: '' }]);
   };
 
   return (
@@ -194,6 +209,71 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
         {extraExpensesInvalid && (
           <p className="extra-expenses-error">Must be a number (e.g. <code>1500</code> or <code>1500,5</code>).</p>
         )}
+      </div>
+
+      <div className="extra-expenses">
+        <span className="extra-expenses-label">Agents</span>
+        <p className="nickname-hint">
+          Players whose agent in the <code>Member Statistics</code> sheet has this name get their own table, together with the agent.
+          Rake % is the agent's share of their total rake and is subtracted from the netto rake.
+        </p>
+        <table className="player-table">
+          <thead>
+            <tr>
+              <th>Add Agent</th>
+              <th>Rake %</th>
+              <th aria-label="Delete" />
+            </tr>
+          </thead>
+          <tbody>
+            {agentRows.map(row => {
+              const invalid = invalidAgentIds.has(row.id);
+              return (
+                <tr key={row.id}>
+                  <td>
+                    <input
+                      type="text"
+                      className={`player-input${invalid && row.name.trim() === '' ? ' player-input-invalid' : ''}`}
+                      value={row.name}
+                      onChange={e => updateAgentRow(row.id, { name: e.target.value })}
+                      placeholder="agent nickname"
+                      aria-label="Agent nickname"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className={`player-input player-input-number${invalid && row.name.trim() !== '' ? ' player-input-invalid' : ''}`}
+                      value={row.rakeShareText}
+                      onChange={e => updateAgentRow(row.id, { rakeShareText: e.target.value })}
+                      placeholder="%"
+                      aria-label={`Rake % for ${row.name || 'agent'}`}
+                      aria-invalid={invalid}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="player-delete-button"
+                      onClick={() => onAgentRowsChange(agentRows.filter(r => r.id !== row.id))}
+                      title="Delete agent"
+                      aria-label={`Delete ${row.name || 'agent'}`}
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {invalidAgentIds.size > 0 && (
+          <p className="extra-expenses-error">Every agent needs a name and a Rake % (e.g. <code>30</code> or <code>27,5</code>).</p>
+        )}
+        <button type="button" className="player-add-button" onClick={addAgentRow}>
+          + Add agent
+        </button>
       </div>
     </div>
   );

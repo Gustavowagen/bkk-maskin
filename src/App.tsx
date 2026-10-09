@@ -4,9 +4,10 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, extractMemberStatistics, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import { readExcelFile, extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
 import type { MemberStatistic } from './utils/excelUtils'
-import type { NicknameWithLine } from './types'
+import { fetchPlayerNames } from './utils/playerNames'
+import type { AgentInput, AgentRow, NicknameWithLine } from './types'
 
 /**
  * Parse the "Ekstra utgifter" field. Empty counts as 0; "," or "." may be used as decimal separator.
@@ -19,6 +20,28 @@ const parseExtraExpenses = (text: string): number | undefined => {
   return Number(trimmed.replace(',', '.'))
 }
 
+/**
+ * Parse the agents list. Rows with neither a name nor a rake % are ignored.
+ * A row is invalid if it has a name but no valid rake % (or a rake % but no name).
+ */
+const parseAgents = (rows: AgentRow[]): { agents: AgentInput[]; invalidIds: Set<number> } => {
+  const agents: AgentInput[] = []
+  const invalidIds = new Set<number>()
+  rows.forEach(row => {
+    const name = row.name.trim()
+    const rakeShareText = row.rakeShareText.trim()
+    if (name === '' && rakeShareText === '') return
+    if (name === '' || !/^\d+([.,]\d+)?$/.test(rakeShareText)) {
+      invalidIds.add(row.id)
+      return
+    }
+    // The same agent entered twice only gets one table
+    if (agents.some(agent => agent.name.toLowerCase() === name.toLowerCase())) return
+    agents.push({ name, rakeShare: Number(rakeShareText.replace(',', '.')) })
+  })
+  return { agents, invalidIds }
+}
+
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null)
@@ -28,8 +51,12 @@ function App() {
   const [nicknames, setNicknames] = useState<NicknameWithLine[]>([])
   const [memberStatistics, setMemberStatistics] = useState<MemberStatistic[]>([])
   const [extraExpensesText, setExtraExpensesText] = useState('')
+  const [playerNamesError, setPlayerNamesError] = useState<string | null>(null)
+  const [agentRows, setAgentRows] = useState<AgentRow[]>([{ id: 0, name: '', rakeShareText: '' }])
 
   const extraExpenses = parseExtraExpenses(extraExpensesText)
+  const { agents, invalidIds: invalidAgentIds } = parseAgents(agentRows)
+  const inputInvalid = extraExpenses === undefined || invalidAgentIds.size > 0
 
   // Memoize ParticlesBackground to prevent re-renders
   const particles = useMemo(() => <ParticlesBackground />, []);
@@ -51,6 +78,15 @@ function App() {
     </p>
   )
 
+  // Agents without any players or own row in "Member Statistics" get an empty table
+  const agentsWithoutMembers = agents.filter(agent => findAgentMembers(memberStatistics, agent.name).length === 0)
+  const agentsWarning = agentsWithoutMembers.length > 0 && (
+    <p className="warning-message">
+      ⚠️ No players found for agent(s) in the "Member Statistics" sheet:{' '}
+      <strong>{agentsWithoutMembers.map(agent => agent.name).join(', ')}</strong>
+    </p>
+  )
+
   const handleFileUpload = async (uploadedFile: File) => {
     setFile(uploadedFile)
     setIsFiltered(false)
@@ -69,7 +105,7 @@ function App() {
     try {
       const stats = extractMemberStatistics(wb)
       setMemberStatistics(stats)
-      setNicknames(stats.map(({ nickname }) => ({ nickname, line: undefined })))
+      setNicknames(stats.filter(isActiveMember).map(({ nickname }) => ({ nickname, line: undefined })))
     } catch (error) {
       console.error('Error finding active players:', error)
       setMemberStatistics([])
@@ -79,13 +115,23 @@ function App() {
     setWorkbook(wb)
   }
 
-  const handleFilter = () => {
-    if (!workbook || extraExpenses === undefined) return
+  const handleFilter = async () => {
+    if (!workbook || extraExpenses === undefined || inputInvalid) return
 
     setIsProcessing(true)
 
+    // Real names come from Google Sheets; without them the "Navn" column is left blank
+    let realNames = new Map<string, string>()
     try {
-      const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics, extraExpenses)
+      realNames = await fetchPlayerNames()
+      setPlayerNamesError(null)
+    } catch (error) {
+      console.error('Error fetching real names:', error)
+      setPlayerNamesError(error instanceof Error ? error.message : 'Could not fetch real names.')
+    }
+
+    try {
+      const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics, extraExpenses, realNames, agents)
       setFilteredWorkbook(filtered)
       setIsFiltered(true)
     } catch (error) {
@@ -125,12 +171,15 @@ function App() {
               extraExpensesText={extraExpensesText}
               onExtraExpensesTextChange={setExtraExpensesText}
               extraExpensesInvalid={extraExpenses === undefined}
+              agentRows={agentRows}
+              onAgentRowsChange={setAgentRows}
+              invalidAgentIds={invalidAgentIds}
             />
 
             <button 
               className="filter-button"
               onClick={handleFilter}
-              disabled={isProcessing || extraExpenses === undefined}
+              disabled={isProcessing || inputInvalid}
             >
               {isProcessing ? 'Filtering...' : 'Filter'}
             </button>
@@ -142,6 +191,7 @@ function App() {
             )}
 
             {missingPlayersWarning}
+            {agentsWarning}
           </>
         )}
 
@@ -152,6 +202,11 @@ function App() {
               Filtered {nicknames.length} nickname(s)
             </p>
             {missingPlayersWarning}
+            {playerNamesError && (
+              <p className="warning-message">
+                ⚠️ {playerNamesError} The "Navn" column is left blank.
+              </p>
+            )}
             <button 
               className="download-button"
               onClick={handleDownload}
