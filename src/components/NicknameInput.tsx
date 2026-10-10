@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { OWNER_RAKEBACK } from '../types';
 import type { AgentRow, NicknameWithLine } from '../types';
 import './NicknameInput.css';
 
@@ -28,8 +29,6 @@ interface PlayerRow {
 /**
  * Parse a number that may use "," as decimal separator. Returns undefined if invalid.
  */
-const OWNER_RAKEBACK = 100;
-
 const parseDecimal = (value: string): number | undefined => {
   const parsed = parseFloat(value.trim().replace(',', '.'));
   return isNaN(parsed) ? undefined : parsed;

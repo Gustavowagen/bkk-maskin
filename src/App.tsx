@@ -7,6 +7,7 @@ import ParticlesBackground from './components/ParticlesBackground'
 import { readExcelFile, extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
 import type { MemberStatistic } from './utils/excelUtils'
 import { fetchPlayerNames } from './utils/playerNames'
+import { OWNER_RAKEBACK, isDefaultOwner } from './types'
 import type { AgentInput, AgentRow, NicknameWithLine } from './types'
 
 /**
@@ -105,7 +106,11 @@ function App() {
     try {
       const stats = extractMemberStatistics(wb)
       setMemberStatistics(stats)
-      setNicknames(stats.filter(isActiveMember).map(({ nickname }) => ({ nickname, line: undefined })))
+      setNicknames(stats.filter(isActiveMember).map(({ nickname }) =>
+        isDefaultOwner(nickname)
+          ? { nickname, line: undefined, rakeback: OWNER_RAKEBACK, owner: true }
+          : { nickname, line: undefined }
+      ))
     } catch (error) {
       console.error('Error finding active players:', error)
       setMemberStatistics([])
