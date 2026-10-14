@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import './App.css'
 import FileUpload from './components/FileUpload'
@@ -6,7 +6,8 @@ import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
 import { readExcelFile, extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
 import type { MemberStatistic } from './utils/excelUtils'
-import { fetchPlayerNames } from './utils/playerNames'
+import { fetchPlayerSheet, findRbSetting } from './utils/playerNames'
+import type { PlayerSheetData } from './utils/playerNames'
 import { OWNER_RAKEBACK, isDefaultOwner } from './types'
 import type { AgentInput, AgentRow, NicknameWithLine } from './types'
 
@@ -55,6 +56,11 @@ function App() {
   const [memberStatistics, setMemberStatistics] = useState<MemberStatistic[]>([])
   const [extraExpensesText, setExtraExpensesText] = useState('')
   const [playerNamesError, setPlayerNamesError] = useState<string | null>(null)
+  // Real names and rb settings from Google Sheets, fetched on upload (null if that failed)
+  const [playerSheet, setPlayerSheet] = useState<PlayerSheetData | null>(null)
+  const [isLoadingPlayers, setIsLoadingPlayers] = useState(false)
+  // Only the latest upload may fill in the player table
+  const uploadIdRef = useRef(0)
   const [agentRows, setAgentRows] = useState<AgentRow[]>([{ id: 0, name: '', rakeShareText: '', previousBalanceText: '' }])
 
   const extraExpenses = parseOptionalNumber(extraExpensesText)
@@ -90,29 +96,59 @@ function App() {
     </p>
   )
 
+  /**
+   * Fetch the player sheet from Google Sheets. Returns null (and shows a warning) if that fails.
+   */
+  const loadPlayerSheet = async (): Promise<PlayerSheetData | null> => {
+    try {
+      const sheet = await fetchPlayerSheet()
+      setPlayerNamesError(null)
+      return sheet
+    } catch (error) {
+      console.error('Error fetching player sheet:', error)
+      setPlayerNamesError(error instanceof Error ? error.message : 'Could not fetch real names.')
+      return null
+    }
+  }
+
   const handleFileUpload = async (uploadedFile: File) => {
+    const uploadId = ++uploadIdRef.current
     setFile(uploadedFile)
     setIsFiltered(false)
     setFilteredWorkbook(null)
     setExtraExpensesText('')
+    setWorkbook(null)
+
+    // The player sheet is fetched while the file is read, so the rb column can pre-fill the player table
+    setIsLoadingPlayers(true)
+    const playerSheetPromise = loadPlayerSheet()
 
     let wb: XLSX.WorkBook
     try {
       wb = await readExcelFile(uploadedFile)
     } catch (error) {
       console.error('Error reading file:', error)
+      if (uploadId === uploadIdRef.current) setIsLoadingPlayers(false)
       alert(error instanceof Error ? error.message : 'Error reading Excel file. Please make sure it is a valid Excel file.')
       return
     }
 
+    const sheet = await playerSheetPromise
+    if (uploadId !== uploadIdRef.current) return
+    setPlayerSheet(sheet)
+    setIsLoadingPlayers(false)
+
     try {
       const stats = extractMemberStatistics(wb)
       setMemberStatistics(stats)
-      setNicknames(stats.filter(isActiveMember).map(({ nickname }) =>
-        isDefaultOwner(nickname)
-          ? { nickname, line: undefined, rakeback: OWNER_RAKEBACK, owner: true }
-          : { nickname, line: undefined }
-      ))
+      setNicknames(stats.filter(isActiveMember).map(({ nickname }): NicknameWithLine => {
+        // The "rb" column decides owner / rakeback; when it is blank the default owners still apply
+        const rbSetting = sheet ? findRbSetting(sheet.rbSettings, nickname) : undefined
+        if (rbSetting?.owner || (!rbSetting && isDefaultOwner(nickname))) {
+          return { nickname, line: undefined, rakeback: OWNER_RAKEBACK, owner: true }
+        }
+        return { nickname, line: undefined, rakeback: rbSetting?.rakeback }
+      }))
     } catch (error) {
       console.error('Error finding active players:', error)
       setMemberStatistics([])
@@ -127,15 +163,14 @@ function App() {
 
     setIsProcessing(true)
 
-    // Real names come from Google Sheets; without them the "Navn" column is left blank
-    let realNames = new Map<string, string>()
-    try {
-      realNames = await fetchPlayerNames()
-      setPlayerNamesError(null)
-    } catch (error) {
-      console.error('Error fetching real names:', error)
-      setPlayerNamesError(error instanceof Error ? error.message : 'Could not fetch real names.')
+    // Real names come from Google Sheets (fetched on upload, retried here if that failed);
+    // without them the "Navn" column is left blank
+    let sheet = playerSheet
+    if (!sheet) {
+      sheet = await loadPlayerSheet()
+      setPlayerSheet(sheet)
     }
+    const realNames = sheet?.realNames ?? new Map<string, string>()
 
     try {
       const filtered = filterWorkbookByNicknames(workbook, nicknames, memberStatistics, extraExpenses, realNames, agents)
@@ -169,6 +204,10 @@ function App() {
           id="context-file"
         />
 
+        {isLoadingPlayers && (
+          <p className="info-message">Loading players from Google Sheets...</p>
+        )}
+
         {workbook && !isFiltered && (
           <>
             <NicknameInput 
@@ -199,6 +238,11 @@ function App() {
 
             {missingPlayersWarning}
             {agentsWarning}
+            {playerNamesError && (
+              <p className="warning-message">
+                ⚠️ {playerNamesError} Rakeback and owners from the "rb" column are not filled in.
+              </p>
+            )}
           </>
         )}
 
