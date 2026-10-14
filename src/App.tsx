@@ -11,10 +11,10 @@ import { OWNER_RAKEBACK, isDefaultOwner } from './types'
 import type { AgentInput, AgentRow, NicknameWithLine } from './types'
 
 /**
- * Parse the "Ekstra utgifter" field. Empty counts as 0; "," or "." may be used as decimal separator.
+ * Parse an optional number field ("Ekstra utgifter", "Saldo fra før"). Empty counts as 0; "," or "." may be used as decimal separator.
  * Returns undefined if the text is not a valid number.
  */
-const parseExtraExpenses = (text: string): number | undefined => {
+const parseOptionalNumber = (text: string): number | undefined => {
   const trimmed = text.trim()
   if (trimmed === '') return 0
   if (!/^-?\d+([.,]\d+)?$/.test(trimmed)) return undefined
@@ -22,8 +22,9 @@ const parseExtraExpenses = (text: string): number | undefined => {
 }
 
 /**
- * Parse the agents list. Rows with neither a name nor a rake % are ignored.
- * A row is invalid if it has a name but no valid rake % (or a rake % but no name).
+ * Parse the agents list. Empty rows are ignored.
+ * A row is invalid if it has a name but no valid rake % (or a rake % / saldo but no name),
+ * or if "Saldo fra før" is entered but is not a valid number.
  */
 const parseAgents = (rows: AgentRow[]): { agents: AgentInput[]; invalidIds: Set<number> } => {
   const agents: AgentInput[] = []
@@ -31,14 +32,15 @@ const parseAgents = (rows: AgentRow[]): { agents: AgentInput[]; invalidIds: Set<
   rows.forEach(row => {
     const name = row.name.trim()
     const rakeShareText = row.rakeShareText.trim()
-    if (name === '' && rakeShareText === '') return
-    if (name === '' || !/^\d+([.,]\d+)?$/.test(rakeShareText)) {
+    if (name === '' && rakeShareText === '' && row.previousBalanceText.trim() === '') return
+    const previousBalance = parseOptionalNumber(row.previousBalanceText)
+    if (name === '' || !/^\d+([.,]\d+)?$/.test(rakeShareText) || previousBalance === undefined) {
       invalidIds.add(row.id)
       return
     }
     // The same agent entered twice only gets one table
     if (agents.some(agent => agent.name.toLowerCase() === name.toLowerCase())) return
-    agents.push({ name, rakeShare: Number(rakeShareText.replace(',', '.')) })
+    agents.push({ name, rakeShare: Number(rakeShareText.replace(',', '.')), previousBalance })
   })
   return { agents, invalidIds }
 }
@@ -53,9 +55,9 @@ function App() {
   const [memberStatistics, setMemberStatistics] = useState<MemberStatistic[]>([])
   const [extraExpensesText, setExtraExpensesText] = useState('')
   const [playerNamesError, setPlayerNamesError] = useState<string | null>(null)
-  const [agentRows, setAgentRows] = useState<AgentRow[]>([{ id: 0, name: '', rakeShareText: '' }])
+  const [agentRows, setAgentRows] = useState<AgentRow[]>([{ id: 0, name: '', rakeShareText: '', previousBalanceText: '' }])
 
-  const extraExpenses = parseExtraExpenses(extraExpensesText)
+  const extraExpenses = parseOptionalNumber(extraExpensesText)
   const { agents, invalidIds: invalidAgentIds } = parseAgents(agentRows)
   const inputInvalid = extraExpenses === undefined || invalidAgentIds.size > 0
 
