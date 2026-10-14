@@ -205,7 +205,22 @@ function App() {
         />
 
         {isLoadingPlayers && (
-          <p className="info-message">Loading players from Google Sheets...</p>
+          <div className="players-loading" role="status" aria-live="polite">
+            <div className="players-loading-header">
+              <span className="loading-spinner" aria-hidden="true" />
+              <span className="info-message">Loading players from Google Sheets...</span>
+            </div>
+            <div className="skeleton-rows" aria-hidden="true">
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} className="skeleton-row" style={{ animationDelay: `${i * 0.08}s` }}>
+                  <span className="skeleton-cell" />
+                  <span className="skeleton-cell" />
+                  <span className="skeleton-cell" />
+                  <span className="skeleton-cell skeleton-cell-narrow" />
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {workbook && !isFiltered && (
