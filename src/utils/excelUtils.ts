@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
-import type { AgentInput, NicknameWithLine } from '../types';
+import type { AgentInput, NicknameWithLine, OwnerAccountGroup } from '../types';
+import { OWNER_ACCOUNT_GROUPS } from '../types';
 import { findRealName } from './playerNames';
 
 /**
@@ -194,16 +195,20 @@ export const findAgentMembers = (memberStatistics: MemberStatistic[], agentName:
 const MAIN_TABLE_COLUMN_COUNT = 12;
 // The owners table sits to the right of the main table, with one empty column in between
 const OWNERS_TABLE_COLUMN_INDEX = MAIN_TABLE_COLUMN_COUNT + 1;
-const OWNERS_TABLE_HEADERS = ['Nickname', 'Navn', 'Line', 'Chips', 'Rake', 'Profit/Loss', 'Rake share', 'Ny Saldo', 'uttak sum', 'ruller', 'claima chips', 'satt opp'];
+const OWNERS_TABLE_HEADERS = ['Nickname', 'Navn', 'Line', 'Chips', 'Rake', 'Profit/Loss', 'Rake share', 'Rb+rake', 'Ny Saldo', 'uttak sum', 'ruller', 'claima chips', 'satt opp'];
 // The stats table sits to the right of the owners table, with one empty column in between
 const STATS_TABLE_COLUMN_INDEX = OWNERS_TABLE_COLUMN_INDEX + OWNERS_TABLE_HEADERS.length + 1;
 const STATS_TABLE_ROW_COUNT = 2; // Header + values
 const STATS_TABLE_HEADERS = ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter', 'Total RB', 'Total agent RB'];
 // Agent tables sit to the right of the stats table, side by side with one empty column in between.
-// Each table has the agent name above it, then the headers, one row per player, a total row and a rake share row.
+// Each table has the agent name above it, then the headers, one row per player, a total row, a rake share row,
+// a "Saldo fra før" row and a "Ny Saldo" row.
 const AGENT_TABLES_COLUMN_INDEX = STATS_TABLE_COLUMN_INDEX + STATS_TABLE_HEADERS.length + 1;
 const AGENT_TABLE_HEADERS = ['Nickname', 'Chips', 'Rake', 'Profit/Loss'];
 const AGENT_TABLE_STRIDE = AGENT_TABLE_HEADERS.length + 1;
+const AGENT_TABLE_SUMMARY_ROW_COUNT = 4; // Total, rake share, saldo fra før and ny saldo
+// Number of empty rows in each transfer table, below its header
+const TRANSFER_TABLE_ROW_COUNT = 25;
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
 
@@ -268,12 +273,16 @@ export const findPlayersMissingFromBalance = (
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (chips - line if line exists, otherwise just chips, plus rakeback)
  * - Owners are left out of the main table and put in an owners table to the right of it
- *   ("Rake share" = Netto Rake / number of owners, "Ny Saldo" = Profit/Loss + Rake share)
+ *   ("Rake share" = Netto Rake / number of owners, "Rb+rake" = Rake + Rake share, "Ny Saldo" = Profit/Loss + Rake share).
+ *   An owner with several accounts (OWNER_ACCOUNT_GROUPS) counts as one owner: his rake share is split between
+ *   his accounts, and a total row (Rake, Profit/Loss, Rake share, Rb+rake) is added below them.
  * - Agents and players whose agent (in "Member Statistics") is one of the entered agents are left out
  *   of the main and owners tables and put in a table per agent to the right of the stats table.
  *   Their Profit/Loss is the total player P&L from "Member Statistics" (line and rakeback are ignored).
  *   The agent is included even if he is not an active player, as long as he is in "Member Statistics".
  *   "Rake share" = total rake of the agent table * the agent's rake %
+ *   "Saldo fra før" = the agent's entered balance from before (0 if not entered),
+ *   "Ny Saldo" = total Profit/Loss of the agent table + Rake share + Saldo fra før
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
  *   "Netto Rake" = Brutto Rake - sum of all players' rakeback - extra expenses - total agent rake share,
  *   both including owners and agent tables, "Ekstra utgifter" = other club expenses entered by the user,
@@ -303,6 +312,8 @@ export const filterWorkbookByNicknames = (
   const positiveData: any[][] = [];
   const negativeData: any[][] = [];
   const ownerData: unknown[][] = [];
+  // Owner rows that are one of several accounts of the same owner
+  const ownerRowGroups = new Map<unknown[], OwnerAccountGroup>();
   let bruttoRake = 0;
   let totalRakeback = 0;
 
@@ -374,8 +385,13 @@ export const filterWorkbookByNicknames = (
     totalRakeback += Number(rakeback || 0);
 
     if (matchingNickname.owner) {
-      // Rake share and Ny Saldo are filled in once the netto rake is known
-      ownerData.push([displayName, realName, lineAmount, chipsDisplay, rake, profitLoss, '', '', '', '', '', '']);
+      // Rake share, Rb+rake and Ny Saldo are filled in once the netto rake is known
+      const ownerRow = [displayName, realName, lineAmount, chipsDisplay, rake, profitLoss, '', '', '', '', '', '', ''];
+      ownerData.push(ownerRow);
+      const group = OWNER_ACCOUNT_GROUPS.find(g =>
+        g.accounts.some(account => sameName(account, matchingNickname.nickname) || sameName(account, displayName))
+      );
+      if (group) ownerRowGroups.set(ownerRow, group);
       return;
     }
 
@@ -423,7 +439,7 @@ export const filterWorkbookByNicknames = (
 
   // Create the transfer table headers and empty rows
   const transferTableHeaders = ['Avsender', 'sum', 'Mottaker', 'bekreftet', 'purra'];
-  const emptyTransferRows = Array(10).fill(['', '', '', '', '']); // 10 empty rows for user input
+  const emptyTransferRows = Array(TRANSFER_TABLE_ROW_COUNT).fill(['', '', '', '', '']); // Empty rows for user input
   
   // Create horizontal arrangement of 3 transfer tables with 3 empty cells between each
   const transferTableHeader = [
@@ -483,24 +499,58 @@ export const filterWorkbookByNicknames = (
     const totalProfitLoss = rows.reduce((sum, row) => sum + row.profitLoss, 0);
     const agentRakeShare = round2(totalRake * agent.rakeShare / 100);
     totalAgentRakeback += agentRakeShare;
+    const newBalance = round2(totalProfitLoss + agentRakeShare + agent.previousBalance);
     return [
       [agent.name, '', '', ''],
       AGENT_TABLE_HEADERS,
       ...rows.map(row => [row.nickname, row.chips, round2(row.rake), round2(row.profitLoss)]),
       ['Total', '', round2(totalRake), round2(totalProfitLoss)],
       [`Rake share (${agent.rakeShare}%)`, '', agentRakeShare, ''],
+      ['Saldo fra før', '', '', round2(agent.previousBalance)],
+      ['Ny Saldo', '', '', newBalance],
     ];
   });
 
   const nettoRake = bruttoRake - totalRakeback - extraExpenses - totalAgentRakeback;
 
-  // Owners table to the right of the main table: the netto rake is split evenly between the owners
-  const rakeShare = ownerData.length > 0 ? round2(nettoRake / ownerData.length) : 0;
+  // Owners table to the right of the main table: the netto rake is split evenly between the owners,
+  // where an owner with several accounts counts once and his share is split between his accounts
+  const accountsByGroup = new Map<OwnerAccountGroup, unknown[][]>();
   ownerData.forEach(row => {
-    row[6] = rakeShare;
-    row[7] = round2(Number(row[ownerProfitLossIndex]) + rakeShare);
+    const group = ownerRowGroups.get(row);
+    if (group) accountsByGroup.set(group, [...(accountsByGroup.get(group) ?? []), row]);
   });
-  placeTable([OWNERS_TABLE_HEADERS, ...ownerData], OWNERS_TABLE_COLUMN_INDEX);
+  const ownerCount = ownerData.length - ownerRowGroups.size + accountsByGroup.size;
+  const rakeShare = ownerCount > 0 ? round2(nettoRake / ownerCount) : 0;
+  const ownerRakeIndex = 4;
+  ownerData.forEach(row => {
+    const group = ownerRowGroups.get(row);
+    const accountRakeShare = group ? round2(rakeShare / accountsByGroup.get(group)!.length) : rakeShare;
+    row[6] = accountRakeShare;
+    // Owners get all of their own rake back, on top of their share of the netto rake
+    row[7] = round2(Number(row[ownerRakeIndex]) + accountRakeShare);
+    row[8] = round2(Number(row[ownerProfitLossIndex]) + accountRakeShare);
+  });
+
+  // Accounts of the same owner are kept together, followed by a total row when more than one is present
+  const ownerTableRows: unknown[][] = [];
+  const placedGroups = new Set<OwnerAccountGroup>();
+  ownerData.forEach(row => {
+    const group = ownerRowGroups.get(row);
+    if (!group) {
+      ownerTableRows.push(row);
+      return;
+    }
+    if (placedGroups.has(group)) return;
+    placedGroups.add(group);
+    const accounts = accountsByGroup.get(group)!;
+    ownerTableRows.push(...accounts);
+    if (accounts.length > 1) {
+      const sum = (index: number) => round2(accounts.reduce((total, account) => total + Number(account[index]), 0));
+      ownerTableRows.push([group.name, '', '', '', sum(ownerRakeIndex), sum(ownerProfitLossIndex), rakeShare, sum(7), '', '', '', '', '']);
+    }
+  });
+  placeTable([OWNERS_TABLE_HEADERS, ...ownerTableRows], OWNERS_TABLE_COLUMN_INDEX);
 
   // Stats table to the right of the owners table
   placeTable([
@@ -544,7 +594,8 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   while (ownersTableRowCount < data.length && data[ownersTableRowCount][OWNERS_TABLE_COLUMN_INDEX] !== '') {
     ownersTableRowCount++;
   }
-  // Agent tables: agent name + header + player rows + total + rake share, all with a non-empty first column
+  // Agent tables: agent name + header + player rows + total, rake share, saldo fra før and ny saldo,
+  // all with a non-empty first column
   const cellText = (rowIndex: number, colIndex: number) => data[rowIndex]?.[colIndex] ?? '';
   const agentTables: { columnNumber: number; rowCount: number }[] = [];
   for (let col = AGENT_TABLES_COLUMN_INDEX; cellText(0, col) !== ''; col += AGENT_TABLE_STRIDE) {
@@ -570,10 +621,10 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
       }
     });
     
-    // Check if this is part of any transfer table (row with 'Avsender' or 10 rows after it)
+    // Check if this is part of any transfer table (row with 'Avsender' or the empty rows after it)
     let isTransferTableRow = false;
     transferTableIndices.forEach(startIdx => {
-      if (rowIndex >= startIdx && rowIndex < startIdx + 11) { // Header + 10 data rows
+      if (rowIndex >= startIdx && rowIndex <= startIdx + TRANSFER_TABLE_ROW_COUNT) { // Header + data rows
         isTransferTableRow = true;
       }
     });
@@ -587,7 +638,7 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
     // Also check if it's between transfer tables (empty rows between them)
     transferTableIndices.forEach((startIdx, tableIdx) => {
       if (tableIdx < transferTableIndices.length - 1) {
-        const currentTableEnd = startIdx + 11; // Header + 10 rows
+        const currentTableEnd = startIdx + 1 + TRANSFER_TABLE_ROW_COUNT; // Header + data rows
         const nextTableStart = transferTableIndices[tableIdx + 1];
         if (rowIndex >= currentTableEnd && rowIndex < nextTableStart) {
           isSeparatorRow = true;
@@ -627,8 +678,8 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
             pattern: 'solid',
             fgColor: { argb: 'FFE0E7FF' }
           };
-        } else if (rowIndex >= agentTable.rowCount - 2) {
-          // Total and rake share rows
+        } else if (rowIndex >= agentTable.rowCount - AGENT_TABLE_SUMMARY_ROW_COUNT) {
+          // Total, rake share, saldo fra før and ny saldo rows
           cell.font = { bold: true };
         }
         continue;
@@ -691,6 +742,9 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
             pattern: 'solid',
             fgColor: { argb: 'FFE0E7FF' }
           };
+        } else if (OWNER_ACCOUNT_GROUPS.some(group => group.name === cellText(rowIndex, OWNERS_TABLE_COLUMN_INDEX))) {
+          // Total row of an owner with several accounts
+          cell.font = { bold: true };
         }
       }
       // Stats table to the right of the owners table

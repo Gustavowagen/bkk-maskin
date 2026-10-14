@@ -97,7 +97,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
 
   const addAgentRow = () => {
     const id = agentRows.reduce((max, row) => Math.max(max, row.id), -1) + 1;
-    onAgentRowsChange([...agentRows, { id, name: '', rakeShareText: '' }]);
+    onAgentRowsChange([...agentRows, { id, name: '', rakeShareText: '', previousBalanceText: '' }]);
   };
 
   return (
@@ -215,18 +215,22 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
         <p className="nickname-hint">
           Players whose agent in the <code>Member Statistics</code> sheet has this name get their own table, together with the agent.
           Rake % is the agent's share of their total rake and is subtracted from the netto rake.
+          Saldo fra før (optional) is the agent's balance from before and is added to their Ny Saldo.
         </p>
         <table className="player-table">
           <thead>
             <tr>
               <th>Add Agent</th>
               <th>Rake %</th>
+              <th>Saldo fra før</th>
               <th aria-label="Delete" />
             </tr>
           </thead>
           <tbody>
             {agentRows.map(row => {
               const invalid = invalidAgentIds.has(row.id);
+              const previousBalanceInvalid = invalid && !/^(-?\d+([.,]\d+)?)?$/.test(row.previousBalanceText.trim());
+              const rakeShareInvalid = invalid && row.name.trim() !== '' && !/^\d+([.,]\d+)?$/.test(row.rakeShareText.trim());
               return (
                 <tr key={row.id}>
                   <td>
@@ -243,12 +247,24 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
                     <input
                       type="text"
                       inputMode="decimal"
-                      className={`player-input player-input-number${invalid && row.name.trim() !== '' ? ' player-input-invalid' : ''}`}
+                      className={`player-input player-input-number${rakeShareInvalid ? ' player-input-invalid' : ''}`}
                       value={row.rakeShareText}
                       onChange={e => updateAgentRow(row.id, { rakeShareText: e.target.value })}
                       placeholder="%"
                       aria-label={`Rake % for ${row.name || 'agent'}`}
-                      aria-invalid={invalid}
+                      aria-invalid={rakeShareInvalid}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className={`player-input player-input-number${previousBalanceInvalid ? ' player-input-invalid' : ''}`}
+                      value={row.previousBalanceText}
+                      onChange={e => updateAgentRow(row.id, { previousBalanceText: e.target.value })}
+                      placeholder="0"
+                      aria-label={`Saldo fra før for ${row.name || 'agent'}`}
+                      aria-invalid={previousBalanceInvalid}
                     />
                   </td>
                   <td>
@@ -268,7 +284,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
           </tbody>
         </table>
         {invalidAgentIds.size > 0 && (
-          <p className="extra-expenses-error">Every agent needs a name and a Rake % (e.g. <code>30</code> or <code>27,5</code>).</p>
+          <p className="extra-expenses-error">Every agent needs a name and a Rake % (e.g. <code>30</code> or <code>27,5</code>), and Saldo fra før must be a number if entered (e.g. <code>-1500</code>).</p>
         )}
         <button type="button" className="player-add-button" onClick={addAgentRow}>
           + Add agent
