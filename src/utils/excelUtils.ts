@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import type { AgentInput, NicknameWithLine, OwnerAccountGroup } from '../types';
 import { OWNER_ACCOUNT_GROUPS } from '../types';
 import { findRealName } from './playerNames';
@@ -22,6 +23,37 @@ export const readExcelFile = (file: File): Promise<XLSX.WorkBook> => {
     reader.onerror = (error) => reject(error);
     reader.readAsBinaryString(file);
   });
+};
+
+export const isZipFile = (file: File): boolean => /\.zip$/i.test(file.name);
+
+/**
+ * Find the context file inside a zip archive. When the zip holds several Excel files,
+ * the first one with a "Club Member Balance" sheet wins.
+ */
+export const extractExcelFromZip = async (zipFile: File): Promise<File> => {
+  const zip = await JSZip.loadAsync(zipFile);
+  // Skip folders, macOS metadata and Excel lock files ("~$name.xlsx")
+  const entries = Object.values(zip.files).filter(entry =>
+    !entry.dir &&
+    /\.xlsx?$/i.test(entry.name) &&
+    !entry.name.startsWith('__MACOSX/') &&
+    !entry.name.split('/').pop()!.startsWith('~$')
+  );
+  if (entries.length === 0) {
+    throw new Error(`No Excel file (.xlsx/.xls) found in ${zipFile.name}.`);
+  }
+
+  const files = await Promise.all(entries.map(async entry =>
+    new File([await entry.async('arraybuffer')], entry.name.split('/').pop()!)
+  ));
+  if (files.length === 1) return files[0];
+
+  for (const file of files) {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', bookSheets: true });
+    if (wb.SheetNames.includes('Club Member Balance')) return file;
+  }
+  return files[0];
 };
 
 // Compare headers ignoring case and whitespace, so "Rake&Fee" matches "Rake & Fee"
