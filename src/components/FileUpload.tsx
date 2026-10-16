@@ -37,7 +37,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile && /\.(xlsx|xls)$/i.test(droppedFile.name)) {
+    if (droppedFile && /\.(xlsx|xls|zip)$/i.test(droppedFile.name)) {
       onFileUpload(droppedFile);
     }
   };
@@ -46,7 +46,7 @@ const FileUpload: React.FC<FileUploadProps> = ({
     <div className="upload-section">
       <input
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.zip"
         onChange={handleFileChange}
         id={id}
       />

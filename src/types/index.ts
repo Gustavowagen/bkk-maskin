@@ -9,7 +9,7 @@ export interface NicknameWithLine {
 export const OWNER_RAKEBACK = 100;
 
 // Players that are marked as owners by default when a file is uploaded (matched case-insensitively)
-export const DEFAULT_OWNERS = ['Finnfettfinger', 'sick1sa', 'Dannern', 'Kejila', 'Guccibike', 'shush22'];
+export const DEFAULT_OWNERS = ['Finnfettfinger', 'sick1sa', 'Dannern', 'Kejila', 'Guccibike', 'shush22', 'Snowie'];
 
 export const isDefaultOwner = (nickname: string): boolean =>
   DEFAULT_OWNERS.some(owner => owner.toLowerCase() === nickname.trim().toLowerCase());
@@ -26,6 +26,7 @@ export interface OwnerAccountGroup {
 
 export const OWNER_ACCOUNT_GROUPS: OwnerAccountGroup[] = [
   { name: 'Kejila + GucciBike', accounts: ['Kejila', 'Guccibike'] },
+  { name: 'shush22 + Snowie', accounts: ['shush22', 'Snowie'] },
 ];
 
 export interface AgentInput {

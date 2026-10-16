@@ -4,7 +4,7 @@ import './App.css'
 import FileUpload from './components/FileUpload'
 import NicknameInput from './components/NicknameInput'
 import ParticlesBackground from './components/ParticlesBackground'
-import { readExcelFile, extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
+import { readExcelFile, isZipFile, extractExcelFromZip,extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile } from './utils/excelUtils'
 import type { MemberStatistic } from './utils/excelUtils'
 import { fetchPlayerSheet, findRbSetting } from './utils/playerNames'
 import type { PlayerSheetData } from './utils/playerNames'
@@ -111,8 +111,21 @@ function App() {
     }
   }
 
-  const handleFileUpload = async (uploadedFile: File) => {
+  const handleFileUpload = async (droppedFile: File) => {
     const uploadId = ++uploadIdRef.current
+
+    let uploadedFile = droppedFile
+    if (isZipFile(droppedFile)) {
+      try {
+        uploadedFile = await extractExcelFromZip(droppedFile)
+      } catch (error) {
+        console.error('Error unzipping file:', error)
+        alert(error instanceof Error ? error.message : 'Could not open the zip file.')
+        return
+      }
+      if (uploadId !== uploadIdRef.current) return
+    }
+
     setFile(uploadedFile)
     setIsFiltered(false)
     setFilteredWorkbook(null)
