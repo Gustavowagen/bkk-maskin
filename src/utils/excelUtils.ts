@@ -270,12 +270,40 @@ const getBalanceRows = (workbook: XLSX.WorkBook): BalanceRow[] => {
 };
 
 /**
- * Find the entered nickname matching a "Club Member Balance" row: the member's nickname
- * must start with the entered nickname (case-insensitive prefix match)
+ * Match every "Club Member Balance" row to an entered nickname (case-insensitive):
+ * - An exact match always wins
+ * - Otherwise the member's nickname must start with the entered nickname, and the longest such
+ *   entered nickname wins (so "Ola123" goes to "Ola123", not "Ola", when both are entered)
+ * - An entered nickname that matches a row exactly does not also claim other rows by prefix
+ *   (so entering "Ola" does not pull in an unentered "Ola123" with Ola's line and rakeback)
+ * Rows without a match are left out of the map.
  */
-const findMatchingNickname = (row: BalanceRow, nicknames: NicknameWithLine[]): NicknameWithLine | undefined => {
-  const memberNickname = row.nickname.toLowerCase();
-  return nicknames.find(nicknameObj => memberNickname.startsWith(nicknameObj.nickname.toLowerCase()));
+const matchBalanceRows = (rows: BalanceRow[], nicknames: NicknameWithLine[]): Map<BalanceRow, NicknameWithLine> => {
+  const exactlyMatched = new Set<NicknameWithLine>();
+  const exactMatches = new Map<BalanceRow, NicknameWithLine>();
+  rows.forEach(row => {
+    const exact = nicknames.find(n => sameName(n.nickname, row.nickname));
+    if (exact) {
+      exactMatches.set(row, exact);
+      exactlyMatched.add(exact);
+    }
+  });
+
+  const matches = new Map<BalanceRow, NicknameWithLine>();
+  rows.forEach(row => {
+    const exact = exactMatches.get(row);
+    if (exact) {
+      matches.set(row, exact);
+      return;
+    }
+    const memberNickname = row.nickname.toLowerCase();
+    const prefixMatch = nicknames
+      .filter(n => !exactlyMatched.has(n) && memberNickname.startsWith(n.nickname.toLowerCase()))
+      .reduce<NicknameWithLine | undefined>((longest, n) =>
+        !longest || n.nickname.length > longest.nickname.length ? n : longest, undefined);
+    if (prefixMatch) matches.set(row, prefixMatch);
+  });
+  return matches;
 };
 
 /**
@@ -286,11 +314,7 @@ export const findPlayersMissingFromBalance = (
   workbook: XLSX.WorkBook,
   nicknames: NicknameWithLine[]
 ): NicknameWithLine[] => {
-  const matched = new Set<NicknameWithLine>();
-  getBalanceRows(workbook).forEach(row => {
-    const match = findMatchingNickname(row, nicknames);
-    if (match) matched.add(match);
-  });
+  const matched = new Set(matchBalanceRows(getBalanceRows(workbook), nicknames).values());
   return nicknames.filter(n => !matched.has(n));
 };
 
@@ -298,7 +322,7 @@ export const findPlayersMissingFromBalance = (
  * Filter Excel workbook based on nicknames
  * - Only processes the "Club Member Balance" sheet
  * - Reads the member nickname and chips columns (located by their headers)
- * - Filters rows where the nickname starts with any of the provided nicknames (case-insensitive prefix match)
+ * - Filters rows matching the provided nicknames: exact match first, otherwise the longest prefix (see matchBalanceRows)
  * - Players without a "Club Member Balance" row are added with 0 chips, shown as "Left Club?"
  * - Adds "Navn" column (real name from the Google Sheet, blank if the nickname is not found)
  * - Adds "Rake" column (total rake from the "Member Statistics" sheet)
@@ -437,11 +461,8 @@ export const filterWorkbookByNicknames = (
     }
   };
 
-  balanceRows.forEach((row) => {
-    const matchingNickname = findMatchingNickname(row, nicknames);
-    if (matchingNickname) {
-      addPlayerRow(row.nickname, row.chips, matchingNickname);
-    }
+  matchBalanceRows(balanceRows, nicknames).forEach((matchingNickname, row) => {
+    addPlayerRow(row.nickname, row.chips, matchingNickname);
   });
 
   // Players without a "Club Member Balance" row still need to settle their line and rakeback
