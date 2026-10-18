@@ -22,3 +22,6 @@ export const formatDate = (isoDate: string): string =>
 
 export const formatFullDate = (isoDate: string): string =>
   new Date(`${isoDate}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+export const formatDateTime = (isoTimestamp: string): string =>
+  new Date(isoTimestamp).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })

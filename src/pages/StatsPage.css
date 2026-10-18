@@ -417,6 +417,11 @@
 .stats-table th {
   padding: 0 0.6rem 0.6rem;
   text-align: left;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
   border-bottom: 1px solid var(--gridline);
 }
 
@@ -543,4 +548,59 @@
 
 .player-chart-header .chart-title {
   margin: 0;
+}
+
+/* Upload log */
+.upload-file {
+  font-weight: 600;
+}
+
+.stats-table td.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  cursor: default;
+}
+
+.upload-delete,
+.upload-cancel {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.upload-delete {
+  color: var(--negative);
+  background: transparent;
+  border: 1px solid rgba(208, 59, 59, 0.4);
+}
+
+.upload-delete.confirm {
+  color: white;
+  background: var(--negative);
+  border-color: var(--negative);
+}
+
+.upload-cancel {
+  color: var(--ink-secondary);
+  background: #f3f4f6;
+  border: 1px solid transparent;
+}
+
+.upload-delete:hover,
+.upload-cancel:hover {
+  transform: none;
+}
+
+.selected-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.selected-period .upload-cancel {
+  white-space: nowrap;
 }

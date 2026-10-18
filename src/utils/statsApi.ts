@@ -98,6 +98,42 @@ export const resetStats = async (): Promise<void> => {
   if (error) throw new Error(`Could not reset statistics: ${error.message}`);
 };
 
+export interface UploadLogRow {
+  id: number;
+  periodStart: string;
+  periodEnd: string;
+  fileName: string;
+  uploadedAt: string; // ISO timestamp
+  players: number;
+  bruttoRake: number;
+  clubNet: number;
+}
+
+/** Every stored period with the file it came from, latest upload first */
+export const fetchUploadLog = async (): Promise<UploadLogRow[]> => {
+  const { data, error } = await client()
+    .from('periods')
+    .select('id, period_start, period_end, file_name, uploaded_at, brutto_rake, club_net, player_stats(count)')
+    .order('uploaded_at', { ascending: false });
+  if (error) throw new Error(`Could not load the upload log: ${error.message}`);
+  return data.map(row => ({
+    id: row.id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    fileName: row.file_name ?? '',
+    uploadedAt: row.uploaded_at,
+    players: Number((row.player_stats as unknown as { count: number }[])[0]?.count ?? 0),
+    bruttoRake: Number(row.brutto_rake),
+    clubNet: Number(row.club_net),
+  }));
+};
+
+/** Delete a stored period and its player stats */
+export const deletePeriod = async (id: number): Promise<void> => {
+  const { error } = await client().rpc('delete_period', { p_id: id });
+  if (error) throw new Error(`Could not delete the upload: ${error.message}`);
+};
+
 /** The latest stored period start, or undefined if nothing is stored yet */
 export const fetchLatestPeriodStart = async (): Promise<string | undefined> => {
   const { data, error } = await client().from('periods').select('period_start').order('period_start', { ascending: false }).limit(1);
