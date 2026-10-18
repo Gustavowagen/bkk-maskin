@@ -15,7 +15,7 @@ npm run preview   # Preview the production build
 
 This is a single-page React + TypeScript app (Vite) that processes poker club Excel files. All logic runs in the browser; statistics are stored in Supabase (project `bkk-maskin`, ref `ojrwrnqsucydveilfyzt`).
 
-`src/App.tsx` switches between two tabs: **Machine** (`src/pages/MachinePage.tsx`, the Excel filter) and **Statistics** (`src/pages/StatsPage.tsx`). The stats page shows club totals and a daily rake chart, then a Players / Agents switch (`src/pages/stats/PlayersView.tsx`, `src/pages/stats/AgentsView.tsx`).
+`src/App.tsx` switches between two tabs: **Machine** (`src/pages/MachinePage.tsx`, the Excel filter) and **Statistics** (`src/pages/StatsPage.tsx`). The stats page shows club totals and a daily rake chart, then a Players / Agents switch (`src/pages/stats/PlayersView.tsx`, `src/pages/stats/AgentsView.tsx`) and an upload log (`src/pages/stats/UploadLog.tsx`) where a stored upload can be clicked to show only its period, or deleted (`delete_period` database function).
 
 **Core data flow:**
 1. User uploads a "context file" (an Excel workbook that must contain a sheet named `Club Member Balance`).

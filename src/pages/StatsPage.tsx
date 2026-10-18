@@ -5,10 +5,11 @@ import { ColumnChart } from '../components/StatsCharts'
 import StatTile from '../components/StatTile'
 import type { StatDelta } from '../components/StatTile'
 import { formatCompact, formatDate, formatFullDate, formatPercent } from '../utils/format'
-import { fetchAgentTotals, fetchLatestPeriodStart, fetchPeriods, fetchPlayerTotals, resetStats } from '../utils/statsApi'
-import type { AgentTotalRow, PeriodRow, PlayerTotalRow } from '../utils/statsApi'
+import { deletePeriod, fetchAgentTotals, fetchLatestPeriodStart, fetchPeriods, fetchPlayerTotals, fetchUploadLog, resetStats } from '../utils/statsApi'
+import type { AgentTotalRow, PeriodRow, PlayerTotalRow, UploadLogRow } from '../utils/statsApi'
 import PlayersView from './stats/PlayersView'
 import AgentsView from './stats/AgentsView'
+import UploadLog from './stats/UploadLog'
 
 // Ranges end at the latest stored period, so they are never empty just because nothing was uploaded today.
 // Statistics older than a year are deleted every night, so a year is the longest range.
@@ -85,21 +86,33 @@ function StatsPage() {
   const [latest, setLatest] = useState<string | null | undefined>(undefined)
   const [data, setData] = useState<RangeData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uploads, setUploads] = useState<UploadLogRow[]>([])
+  // An upload picked in the upload log: the stats then show only its period instead of the range
+  const [selectedUpload, setSelectedUpload] = useState<UploadLogRow | null>(null)
+  // Bumped after an upload is deleted, to load everything again
+  const [reloadKey, setReloadKey] = useState(0)
 
-  const range: DateRange | null = latest ? { from: addDays(latest, -(rangeDays - 1)), to: latest } : null
+  const range: DateRange | null = selectedUpload
+    ? { from: selectedUpload.periodStart, to: selectedUpload.periodStart }
+    : latest ? { from: addDays(latest, -(rangeDays - 1)), to: latest } : null
+  // Length of the window, so the previous window to compare with is just as long
+  const windowDays = selectedUpload ? daysBetween(selectedUpload.periodStart, selectedUpload.periodEnd) : rangeDays
 
   useEffect(() => {
-    fetchLatestPeriodStart()
-      .then(start => setLatest(start ?? null))
+    Promise.all([fetchLatestPeriodStart(), fetchUploadLog()])
+      .then(([start, log]) => {
+        setLatest(start ?? null)
+        setUploads(log)
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load statistics.'))
-  }, [])
+  }, [reloadKey])
 
   useEffect(() => {
     if (!range) return
     let cancelled = false
     Promise.all([
       fetchPeriods(range.from, range.to),
-      fetchPeriods(addDays(range.from, -rangeDays), addDays(range.from, -1)),
+      fetchPeriods(addDays(range.from, -windowDays), addDays(range.from, -1)),
       fetchPlayerTotals(range.from, range.to),
       fetchAgentTotals(range.from, range.to),
     ])
@@ -112,7 +125,20 @@ function StatsPage() {
     return () => {
       cancelled = true
     }
-  }, [range?.from, range?.to]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [range?.from, range?.to, windowDays, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectUpload = (upload: UploadLogRow) => {
+    setSelectedUpload(current => (current?.id === upload.id ? null : upload))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleDeleteUpload = (upload: UploadLogRow) =>
+    deletePeriod(upload.id)
+      .then(() => {
+        if (selectedUpload?.id === upload.id) setSelectedUpload(null)
+        setReloadKey(key => key + 1)
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not delete the upload.'))
 
   // TEMPORARY: reset button, remove together with resetStats and the reset_stats database function
   const handleReset = () => {
@@ -166,7 +192,9 @@ function StatsPage() {
     )
   }
 
-  const rangeLabel = RANGES.find(r => r.days === rangeDays)?.label ?? ''
+  const rangeLabel = selectedUpload
+    ? (windowDays === 1 ? 'day' : `${windowDays} days`)
+    : RANGES.find(r => r.days === rangeDays)?.label ?? ''
   const { periods, previousPeriods, players, agents } = data
 
   const activePlayers = players.filter(p => p.rake !== 0)
@@ -202,15 +230,26 @@ function StatsPage() {
               key={r.days}
               type="button"
               role="radio"
-              aria-checked={rangeDays === r.days}
-              className={rangeDays === r.days ? 'active' : undefined}
-              onClick={() => setRangeDays(r.days)}
+              aria-checked={!selectedUpload && rangeDays === r.days}
+              className={!selectedUpload && rangeDays === r.days ? 'active' : undefined}
+              onClick={() => {
+                setSelectedUpload(null)
+                setRangeDays(r.days)
+              }}
             >
               {r.label}
             </button>
           ))}
         </div>
-        <span className="stats-range">{formatFullDate(range.from)} – {formatFullDate(range.to)}</span>
+        {selectedUpload ? (
+          <span className="stats-range selected-period">
+            Upload {selectedUpload.fileName || ''}: {formatFullDate(selectedUpload.periodStart)}
+            {selectedUpload.periodEnd !== selectedUpload.periodStart && ` – ${formatFullDate(selectedUpload.periodEnd)}`}
+            <button type="button" className="upload-cancel" onClick={() => setSelectedUpload(null)}>Show range</button>
+          </span>
+        ) : (
+          <span className="stats-range">{formatFullDate(range.from)} – {formatFullDate(range.to)}</span>
+        )}
       </div>
 
       <div className="stat-tiles stat-tiles-five">
@@ -271,6 +310,8 @@ function StatsPage() {
             <PlayersView key="agent-players" title="Agent players" showAgent players={agentPlayers} range={range} query={query} onError={setError} />
           </>
         )}
+
+      <UploadLog uploads={uploads} selectedId={selectedUpload?.id ?? null} onSelect={selectUpload} onDelete={handleDeleteUpload} />
     </div>
   )
 }
