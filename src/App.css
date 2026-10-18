@@ -279,3 +279,70 @@
   }
 }
 
+
+.app-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  width: fit-content;
+  margin: 0 auto 1.5rem;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+}
+
+.app-tabs button {
+  padding: 0.6rem 1.6rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+}
+
+.app-tabs button:hover {
+  color: white;
+  transform: none;
+}
+
+.app-tabs button.active {
+  color: #4c1d95;
+  background: white;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.update-data-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.8rem 1.1rem;
+  color: #1f2937;
+  font-weight: 600;
+  background: #f5f7fb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.update-data-option input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.update-data-option span {
+  display: flex;
+  flex-direction: column;
+}
+
+.update-data-option small {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #6b7280;
+}

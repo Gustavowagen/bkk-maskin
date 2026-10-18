@@ -78,6 +78,8 @@ export interface MemberStatistic {
   rake: number;
   profitLoss: number; // Total player P&L
   agent: string; // Agent nickname, '' if the member has no agent
+  hands: number; // "Played Hands" -> "Total", 0 if the column is missing
+  role: string; // "Member" -> "Role" (Player, Agent, Manager, ...), '' if the column is missing
 }
 
 interface HeaderPosition {
@@ -179,7 +181,8 @@ const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined =
  * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
  *   the "Nickname" sub-header underneath it
  * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
- * - Locates the "Player P&L" → "Total" and "Agent" → "Nickname" columns (optional, 0 / '' if missing)
+ * - Locates the "Player P&L" → "Total", "Agent" → "Nickname", "Played Hands" → "Total" and
+ *   "Member" → "Role" columns (optional, 0 / '' if missing)
  * - Reads every row below that until the "TOTAL" row. Members with 0 total rake are included;
  *   use isActiveMember to keep only the players that played in the period.
  */
@@ -189,6 +192,8 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
   const rakeHeader = sheet.findSubHeader('Rake&Fee', 'Total');
   const profitLossHeader = tryFindHeader(() => sheet.findSubHeader('Player P&L', 'Total'));
   const agentHeader = tryFindHeader(() => sheet.findSubHeader('Agent', 'Nickname'));
+  const handsHeader = tryFindHeader(() => sheet.findSubHeader('Played Hands', 'Total'));
+  const roleHeader = tryFindHeader(() => sheet.findSubHeader('Member', 'Role'));
 
   const players: MemberStatistic[] = [];
   const seen = new Set<string>();
@@ -200,21 +205,56 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
     const profitLoss = profitLossHeader ? parseNumber(sheet.cellAt(r, profitLossHeader.col)) : 0;
     const agentCell = agentHeader ? String(sheet.cellAt(r, agentHeader.col) ?? '').trim() : '';
     const agent = agentCell === '-' ? '' : agentCell;
+    const hands = handsHeader ? parseNumber(sheet.cellAt(r, handsHeader.col)) : 0;
+    const role = roleHeader ? String(sheet.cellAt(r, roleHeader.col) ?? '').trim() : '';
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake, profitLoss, agent });
+      players.push({ nickname, rake, profitLoss, agent, hands, role });
     }
   });
 
   return players;
 };
 
+export interface DocumentPeriod {
+  start: string; // ISO date
+  end: string; // ISO date
+}
+
+/**
+ * Read the period the document covers from the "Period : 2026-10-15 ~ 2026-10-15 (UTC -7:00)" cell
+ * at the top left of the "Member Statistics" sheet. Returns undefined if it cannot be found.
+ */
+export const extractPeriod = (workbook: XLSX.WorkBook): DocumentPeriod | undefined => {
+  const sheetName = workbook.SheetNames.find(name => normalizeHeader(name) === normalizeHeader('Member Statistics'));
+  if (!sheetName) return undefined;
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' });
+  for (const row of rows.slice(0, 10)) {
+    for (const cell of row) {
+      const match = /period\s*:?\s*(\d{4}-\d{2}-\d{2})\s*~\s*(\d{4}-\d{2}-\d{2})/i.exec(String(cell));
+      if (match) return { start: match[1], end: match[2] };
+    }
+  }
+  return undefined;
+};
+
 // Players without any rake did not play in the period, so they are not active
 export const isActiveMember = (member: MemberStatistic): boolean => member.rake !== 0;
 
 const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Whether the member is an agent: their role is "Agent", or another member has them as agent.
+ * This does not depend on the agents entered in the app.
+ */
+const isAgentMember = (memberStatistics: MemberStatistic[], member: MemberStatistic): boolean =>
+  sameName(member.role, 'Agent') || memberStatistics.some(m => m !== member && sameName(m.agent, member.nickname));
+
+/** The member's agent from "Member Statistics", '' if none (an agent listed as his own agent has none) */
+const agentOf = (member: MemberStatistic | undefined): string =>
+  member && !sameName(member.agent, member.nickname) ? member.agent : '';
 
 /**
  * Members in "Member Statistics" that belong to the agent: the agent himself and every member
@@ -243,6 +283,35 @@ const AGENT_TABLE_SUMMARY_ROW_COUNT = 4; // Total, rake share, saldo fra før an
 const TRANSFER_TABLE_ROW_COUNT = 25;
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+/** One player's numbers from a filtered document, saved to the statistics */
+export interface PlayerStatsRecord {
+  nickname: string;
+  realName: string;
+  agent: string; // The player's agent from "Member Statistics" (or the agent table he was placed in), '' if none
+  isAgent: boolean; // Whether the player is an agent himself
+  owner: boolean;
+  rake: number;
+  rakeback: number; // Own rakeback (0 for players in an agent table)
+  agentShare: number; // For players in an agent table: the part of the agent's rake share that comes from their rake
+  profitLoss: number; // "Player P&L" -> "Total" from "Member Statistics"
+  hands: number;
+}
+
+/** The totals of a filtered document, matching the stats table in the generated sheet */
+export interface FilterSummary {
+  bruttoRake: number;
+  playerRakeback: number; // "Total RB"
+  agentRakeback: number; // "Total agent RB"
+  extraExpenses: number;
+  totalHands: number; // All members in "Member Statistics"
+  players: PlayerStatsRecord[];
+}
+
+export interface FilterResult {
+  workbook: XLSX.WorkBook;
+  summary: FilterSummary;
+}
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
@@ -352,9 +421,11 @@ export const filterWorkbookByNicknames = (
   extraExpenses = 0,
   realNames: Map<string, string> = new Map(),
   agents: AgentInput[] = []
-): XLSX.WorkBook => {
+): FilterResult => {
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = BALANCE_SHEET_NAME;
+  const totalHands = memberStatistics.reduce((sum, m) => sum + m.hands, 0);
+  const playerRecords: PlayerStatsRecord[] = [];
 
   const balanceRows = getBalanceRows(workbook);
 
@@ -362,7 +433,10 @@ export const filterWorkbookByNicknames = (
   if (nicknames.length === 0) {
     const emptySheet = XLSX.utils.aoa_to_sheet([]);
     XLSX.utils.book_append_sheet(newWorkbook, emptySheet, targetSheetName);
-    return newWorkbook;
+    return {
+      workbook: newWorkbook,
+      summary: { bruttoRake: 0, playerRakeback: 0, agentRakeback: 0, extraExpenses, totalHands, players: [] },
+    };
   }
 
   const positiveData: any[][] = [];
@@ -408,6 +482,18 @@ export const filterWorkbookByNicknames = (
     const rake = stat?.rake ?? 0;
     bruttoRake += rake;
     agentRows.get(agent)!.push({ nickname: displayName, chips: chipsDisplay, rake, profitLoss: stat?.profitLoss ?? 0, isAgent: !!ownAgent });
+    playerRecords.push({
+      nickname: stat?.nickname ?? displayName,
+      realName: findRealName(realNames, displayName, enteredNickname),
+      agent: ownAgent ? agentOf(stat) : agentOf(stat) || agent.name,
+      isAgent: !!ownAgent || (!!stat && isAgentMember(memberStatistics, stat)),
+      owner: false,
+      rake,
+      rakeback: 0,
+      agentShare: round2(rake * agent.rakeShare / 100),
+      profitLoss: stat?.profitLoss ?? 0,
+      hands: stat?.hands ?? 0,
+    });
     return true;
   };
 
@@ -439,6 +525,18 @@ export const filterWorkbookByNicknames = (
 
     bruttoRake += rake;
     totalRakeback += Number(rakeback || 0);
+    playerRecords.push({
+      nickname: stat?.nickname ?? displayName,
+      realName,
+      agent: agentOf(stat),
+      isAgent: !!stat && isAgentMember(memberStatistics, stat),
+      owner: !!matchingNickname.owner,
+      rake,
+      rakeback: Number(rakeback || 0),
+      agentShare: 0,
+      profitLoss: stat?.profitLoss ?? 0,
+      hands: stat?.hands ?? 0,
+    });
 
     if (matchingNickname.owner) {
       // Rake share, Rb+rake and Ny Saldo are filled in once the netto rake is known
@@ -618,13 +716,24 @@ export const filterWorkbookByNicknames = (
   const newWorksheet = XLSX.utils.aoa_to_sheet(combinedData);
   XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, targetSheetName);
 
-  return newWorkbook;
+  return {
+    workbook: newWorkbook,
+    summary: {
+      bruttoRake: round2(bruttoRake),
+      playerRakeback: round2(totalRakeback),
+      agentRakeback: round2(totalAgentRakeback),
+      extraExpenses: round2(extraExpenses),
+      totalHands,
+      players: playerRecords,
+    },
+  };
 };
 
 /**
- * Generate and download Excel file with styling
+ * Build the styled ExcelJS workbook (borders, header styling, column widths) from the filtered workbook.
+ * Used both for the download and for the in-app spreadsheet preview, so they always look the same.
  */
-export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
+const buildStyledWorkbook = (workbook: XLSX.WorkBook): ExcelJS.Workbook => {
   // Create a new ExcelJS workbook
   const excelWorkbook = new ExcelJS.Workbook();
   
@@ -866,7 +975,74 @@ export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: strin
   agentTables.forEach(t => {
     excelWorksheet.mergeCells(1, t.columnNumber, 1, t.columnNumber + AGENT_TABLE_HEADERS.length - 1);
   });
-  
+
+  return excelWorkbook;
+};
+
+export interface PreviewCell {
+  value: string | number | null;
+  bold: boolean;
+  fontSize?: number;
+  /** Background color as a CSS hex color */
+  fill?: string;
+  bordered: boolean;
+  center: boolean;
+  /** Number of columns this cell spans (merged cells) */
+  colSpan: number;
+  /** Covered by a merged cell to its left */
+  covered: boolean;
+}
+
+export interface SheetPreview {
+  rows: PreviewCell[][];
+  /** Column widths in Excel character units */
+  columnWidths: number[];
+}
+
+/**
+ * Build a plain, renderable copy of the styled sheet for the in-app spreadsheet view
+ */
+export const buildSheetPreview = (workbook: XLSX.WorkBook): SheetPreview => {
+  const excelWorksheet = buildStyledWorkbook(workbook).worksheets[0];
+  const columnCount = excelWorksheet.columnCount;
+  const columnWidths = Array.from({ length: columnCount }, (_, i) => excelWorksheet.getColumn(i + 1).width ?? 10);
+
+  const rows: PreviewCell[][] = [];
+  for (let rowNumber = 1; rowNumber <= excelWorksheet.rowCount; rowNumber++) {
+    const excelRow = excelWorksheet.getRow(rowNumber);
+    const row: PreviewCell[] = [];
+    for (let colNumber = 1; colNumber <= columnCount; colNumber++) {
+      const cell = excelRow.getCell(colNumber);
+      const covered = cell.isMerged && cell.master !== cell;
+      let colSpan = 1;
+      if (cell.isMerged && !covered) {
+        while (colNumber + colSpan <= columnCount && excelRow.getCell(colNumber + colSpan).master === cell) colSpan++;
+      }
+      const value = cell.value;
+      const fill = cell.fill?.type === 'pattern' ? cell.fill.fgColor?.argb : undefined;
+      row.push({
+        value: covered ? null : typeof value === 'number' ? value : value === null || value === undefined || value === '' ? null : String(value),
+        bold: cell.font?.bold ?? false,
+        fontSize: cell.font?.size,
+        fill: fill ? `#${fill.slice(-6)}` : undefined,
+        bordered: Boolean(cell.border?.top || cell.border?.left || cell.border?.bottom || cell.border?.right),
+        center: cell.alignment?.horizontal === 'center',
+        colSpan,
+        covered,
+      });
+    }
+    rows.push(row);
+  }
+
+  return { rows, columnWidths };
+};
+
+/**
+ * Generate and download Excel file with styling
+ */
+export const downloadExcelFile = async (workbook: XLSX.WorkBook, filename: string): Promise<void> => {
+  const excelWorkbook = buildStyledWorkbook(workbook);
+
   // Generate Excel file
   const buffer = await excelWorkbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
