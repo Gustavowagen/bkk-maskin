@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { rakeShareLabel } from '../types';
 import type { AgentInput, NicknameWithLine, OwnerAccountGroup } from '../types';
 import { OWNER_ACCOUNT_GROUPS } from '../types';
 import { findRealName } from './playerNames';
@@ -80,6 +81,8 @@ export interface MemberStatistic {
   agent: string; // Agent nickname, '' if the member has no agent
   hands: number; // "Played Hands" -> "Total", 0 if the column is missing
   role: string; // "Member" -> "Role" (Player, Agent, Manager, ...), '' if the column is missing
+  bbjContribution: number; // "Bad Beat Jackpot" -> "Contribution Fee", 0 if the column is missing
+  bbjPayout: number; // "Bad Beat Jackpot" -> "Payouts", 0 if the column is missing
 }
 
 interface HeaderPosition {
@@ -181,8 +184,8 @@ const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined =
  * - Locates the "Member" header (usually merged across Country/Role/ID/Nickname) and
  *   the "Nickname" sub-header underneath it
  * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
- * - Locates the "Player P&L" → "Total", "Agent" → "Nickname", "Played Hands" → "Total" and
- *   "Member" → "Role" columns (optional, 0 / '' if missing)
+ * - Locates the "Player P&L" → "Total", "Agent" → "Nickname", "Played Hands" → "Total",
+ *   "Member" → "Role" and "Bad Beat Jackpot" → "Contribution Fee" / "Payouts" columns (optional, 0 / '' if missing)
  * - Reads every row below that until the "TOTAL" row. Members with 0 total rake are included;
  *   use isActiveMember to keep only the players that played in the period.
  */
@@ -194,6 +197,8 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
   const agentHeader = tryFindHeader(() => sheet.findSubHeader('Agent', 'Nickname'));
   const handsHeader = tryFindHeader(() => sheet.findSubHeader('Played Hands', 'Total'));
   const roleHeader = tryFindHeader(() => sheet.findSubHeader('Member', 'Role'));
+  const bbjContributionHeader = tryFindHeader(() => sheet.findSubHeader('Bad Beat Jackpot', 'Contribution Fee'));
+  const bbjPayoutHeader = tryFindHeader(() => sheet.findSubHeader('Bad Beat Jackpot', 'Payouts'));
 
   const players: MemberStatistic[] = [];
   const seen = new Set<string>();
@@ -207,11 +212,13 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
     const agent = agentCell === '-' ? '' : agentCell;
     const hands = handsHeader ? parseNumber(sheet.cellAt(r, handsHeader.col)) : 0;
     const role = roleHeader ? String(sheet.cellAt(r, roleHeader.col) ?? '').trim() : '';
+    const bbjContribution = bbjContributionHeader ? parseNumber(sheet.cellAt(r, bbjContributionHeader.col)) : 0;
+    const bbjPayout = bbjPayoutHeader ? parseNumber(sheet.cellAt(r, bbjPayoutHeader.col)) : 0;
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake, profitLoss, agent, hands, role });
+      players.push({ nickname, rake, profitLoss, agent, hands, role, bbjContribution, bbjPayout });
     }
   });
 
@@ -276,7 +283,7 @@ const STATS_TABLE_HEADERS = ['Brutto Rake', 'Netto Rake', 'Ekstra utgifter', 'To
 // Each table has the agent name above it, then the headers, one row per player, a total row, a rake share row,
 // a "Saldo fra før" row and a "Ny Saldo" row.
 const AGENT_TABLES_COLUMN_INDEX = STATS_TABLE_COLUMN_INDEX + STATS_TABLE_HEADERS.length + 1;
-const AGENT_TABLE_HEADERS = ['Nickname', 'Chips', 'Rake', 'Profit/Loss'];
+const AGENT_TABLE_HEADERS = ['Nickname', 'Rake', 'Profit/Loss'];
 const AGENT_TABLE_STRIDE = AGENT_TABLE_HEADERS.length + 1;
 const AGENT_TABLE_SUMMARY_ROW_COUNT = 4; // Total, rake share, saldo fra før and ny saldo
 // Number of empty rows in each transfer table, below its header
@@ -305,6 +312,8 @@ export interface FilterSummary {
   agentRakeback: number; // "Total agent RB"
   extraExpenses: number;
   totalHands: number; // All members in "Member Statistics"
+  bbjContribution: number; // Bad beat jackpot contribution fees of all members in "Member Statistics"
+  bbjPayout: number; // Bad beat jackpot payouts to all members in "Member Statistics"
   players: PlayerStatsRecord[];
 }
 
@@ -405,7 +414,8 @@ export const findPlayersMissingFromBalance = (
  *   of the main and owners tables and put in a table per agent to the right of the stats table.
  *   Their Profit/Loss is the total player P&L from "Member Statistics" (line and rakeback are ignored).
  *   The agent is included even if he is not an active player, as long as he is in "Member Statistics".
- *   "Rake share" = total rake of the agent table * the agent's rake %
+ *   "Rake share" = total rake of the agent table * the agent's rake % (his own play and single players
+ *   can have their own %)
  *   "Saldo fra før" = the agent's entered balance from before (0 if not entered),
  *   "Ny Saldo" = total Profit/Loss of the agent table + Rake share + Saldo fra før
  * - Adds a stats table to the right of the owners table ("Brutto Rake" = sum of all players' rake,
@@ -425,6 +435,8 @@ export const filterWorkbookByNicknames = (
   const newWorkbook = XLSX.utils.book_new();
   const targetSheetName = BALANCE_SHEET_NAME;
   const totalHands = memberStatistics.reduce((sum, m) => sum + m.hands, 0);
+  const bbjContribution = round2(memberStatistics.reduce((sum, m) => sum + m.bbjContribution, 0));
+  const bbjPayout = round2(memberStatistics.reduce((sum, m) => sum + m.bbjPayout, 0));
   const playerRecords: PlayerStatsRecord[] = [];
 
   const balanceRows = getBalanceRows(workbook);
@@ -435,7 +447,7 @@ export const filterWorkbookByNicknames = (
     XLSX.utils.book_append_sheet(newWorkbook, emptySheet, targetSheetName);
     return {
       workbook: newWorkbook,
-      summary: { bruttoRake: 0, playerRakeback: 0, agentRakeback: 0, extraExpenses, totalHands, players: [] },
+      summary: { bruttoRake: 0, playerRakeback: 0, agentRakeback: 0, extraExpenses, totalHands, bbjContribution, bbjPayout, players: [] },
     };
   }
 
@@ -462,8 +474,8 @@ export const filterWorkbookByNicknames = (
 
   interface AgentTableRow {
     nickname: string;
-    chips: unknown;
     rake: number;
+    agentShare: number; // The agent's share of this row's rake (not rounded)
     profitLoss: number;
     isAgent: boolean;
   }
@@ -474,14 +486,20 @@ export const filterWorkbookByNicknames = (
    * Put the player in his agent's table if he is one of the entered agents or one of their players.
    * Returns false if the player does not belong to any agent.
    */
-  const addAgentTableRow = (displayName: string, chipsDisplay: unknown, stat: MemberStatistic | undefined, enteredNickname: string): boolean => {
+  const addAgentTableRow = (displayName: string, stat: MemberStatistic | undefined, enteredNickname: string): boolean => {
     const ownAgent = findAgent(displayName) ?? findAgent(enteredNickname) ?? (stat && findAgent(stat.nickname));
     const agent = ownAgent ?? (stat?.agent ? findAgent(stat.agent) : undefined);
     if (!agent) return false;
 
     const rake = stat?.rake ?? 0;
+    // The agent's own play and some players can have a different share than the rest of his players
+    const exception = agent.playerRakeShares?.find(p =>
+      [displayName, enteredNickname, stat?.nickname].some(name => name !== undefined && sameName(name, p.nickname))
+    );
+    const rakeSharePercent = ownAgent ? agent.ownRakeShare ?? agent.rakeShare : exception?.rakeShare ?? agent.rakeShare;
+    const agentShare = rake * rakeSharePercent / 100;
     bruttoRake += rake;
-    agentRows.get(agent)!.push({ nickname: displayName, chips: chipsDisplay, rake, profitLoss: stat?.profitLoss ?? 0, isAgent: !!ownAgent });
+    agentRows.get(agent)!.push({ nickname: displayName, rake, agentShare, profitLoss: stat?.profitLoss ?? 0, isAgent: !!ownAgent });
     playerRecords.push({
       nickname: stat?.nickname ?? displayName,
       realName: findRealName(realNames, displayName, enteredNickname),
@@ -490,7 +508,7 @@ export const filterWorkbookByNicknames = (
       owner: false,
       rake,
       rakeback: 0,
-      agentShare: round2(rake * agent.rakeShare / 100),
+      agentShare: round2(agentShare),
       profitLoss: stat?.profitLoss ?? 0,
       hands: stat?.hands ?? 0,
     });
@@ -499,7 +517,7 @@ export const filterWorkbookByNicknames = (
 
   const addPlayerRow = (displayName: string, chips: number, matchingNickname: NicknameWithLine, chipsDisplay: unknown = chips) => {
     const stat = findStat(matchingNickname.nickname);
-    if (addAgentTableRow(displayName, chipsDisplay, stat, matchingNickname.nickname)) return;
+    if (addAgentTableRow(displayName, stat, matchingNickname.nickname)) return;
 
     const hasLine = matchingNickname.line !== undefined;
     const lineAmount = matchingNickname.line !== undefined ? matchingNickname.line : '';
@@ -575,7 +593,7 @@ export const filterWorkbookByNicknames = (
     if (!stat) return;
     const balanceRow = balanceRows.find(row => sameName(row.nickname, stat.nickname))
       ?? balanceRows.find(row => row.nickname.toLowerCase().startsWith(stat.nickname.toLowerCase()));
-    addAgentTableRow(balanceRow?.nickname ?? stat.nickname, balanceRow ? balanceRow.chips : 'Left Club?', stat, stat.nickname);
+    addAgentTableRow(balanceRow?.nickname ?? stat.nickname, stat, stat.nickname);
   });
 
   // Sort both arrays by profit/loss (highest first)
@@ -648,17 +666,17 @@ export const filterWorkbookByNicknames = (
     rows.sort((a, b) => Number(b.isAgent) - Number(a.isAgent) || b.profitLoss - a.profitLoss);
     const totalRake = rows.reduce((sum, row) => sum + row.rake, 0);
     const totalProfitLoss = rows.reduce((sum, row) => sum + row.profitLoss, 0);
-    const agentRakeShare = round2(totalRake * agent.rakeShare / 100);
+    const agentRakeShare = round2(rows.reduce((sum, row) => sum + row.agentShare, 0));
     totalAgentRakeback += agentRakeShare;
     const newBalance = round2(totalProfitLoss + agentRakeShare + agent.previousBalance);
     return [
-      [agent.name, '', '', ''],
+      [agent.name, '', ''],
       AGENT_TABLE_HEADERS,
-      ...rows.map(row => [row.nickname, row.chips, round2(row.rake), round2(row.profitLoss)]),
-      ['Total', '', round2(totalRake), round2(totalProfitLoss)],
-      [`Rake share (${agent.rakeShare}%)`, '', agentRakeShare, ''],
-      ['Saldo fra før', '', '', round2(agent.previousBalance)],
-      ['Ny Saldo', '', '', newBalance],
+      ...rows.map(row => [row.nickname, round2(row.rake), round2(row.profitLoss)]),
+      ['Total', round2(totalRake), round2(totalProfitLoss)],
+      [`Rake share (${rakeShareLabel(agent)})`, agentRakeShare, ''],
+      ['Saldo fra før', '', round2(agent.previousBalance)],
+      ['Ny Saldo', '', newBalance],
     ];
   });
 
@@ -724,6 +742,8 @@ export const filterWorkbookByNicknames = (
       agentRakeback: round2(totalAgentRakeback),
       extraExpenses: round2(extraExpenses),
       totalHands,
+      bbjContribution,
+      bbjPayout,
       players: playerRecords,
     },
   };

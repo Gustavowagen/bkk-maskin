@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { OWNER_RAKEBACK } from '../types';
+import { KNOWN_AGENTS, OWNER_RAKEBACK, rakeShareLabel } from '../types';
 import type { AgentRow, NicknameWithLine } from '../types';
 import './NicknameInput.css';
 
@@ -12,6 +12,7 @@ interface NicknameInputProps {
   agentRows: AgentRow[];
   onAgentRowsChange: (rows: AgentRow[]) => void;
   invalidAgentIds: Set<number>;
+  agentPlayerNicknames: Set<string>; // Lowercase nicknames of entered agents and their players, hidden from the player table
 }
 
 /**
@@ -71,8 +72,20 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
   agentRows,
   onAgentRowsChange,
   invalidAgentIds,
+  agentPlayerNicknames,
 }) => {
   const [rows, setRows] = useState<PlayerRow[]>(() => nicknames.map(toRow));
+  const [search, setSearch] = useState('');
+
+  // Agent players stay in the nicknames (they are put in the agent tables) but are not shown
+  const playerRows = rows.filter(row => !agentPlayerNicknames.has(row.nickname.trim().toLowerCase()));
+  const hiddenAgentPlayerCount = rows.length - playerRows.length;
+
+  // Rows without a nickname (just added) stay visible so they can be filled in.
+  const searchTerm = search.trim().toLowerCase();
+  const visibleRows = searchTerm
+    ? playerRows.filter(row => row.nickname.trim() === '' || row.nickname.toLowerCase().includes(searchTerm))
+    : playerRows;
 
   const updateRows = (newRows: PlayerRow[]) => {
     setRows(newRows);
@@ -107,6 +120,25 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
         Players with rake in the <code>Member Statistics</code> sheet. Line is in 1000s (e.g. <code>4,5</code> = 4500) and rakeback is in %, both optional. Owners always get 100% rakeback.
       </p>
 
+      <div className="player-search">
+        <input
+          type="text"
+          className="player-input player-search-input"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search players"
+          aria-label="Search players"
+        />
+        <button
+          type="button"
+          className="player-search-clear"
+          onClick={() => setSearch('')}
+          disabled={search === ''}
+        >
+          Clear search
+        </button>
+      </div>
+
       <table className="player-table">
         <thead>
           <tr>
@@ -118,7 +150,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
           </tr>
         </thead>
         <tbody>
-          {rows.map(row => (
+          {visibleRows.map(row => (
             <tr key={row.id}>
               <td>
                 <input
@@ -172,8 +204,19 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
               </td>
             </tr>
           ))}
+          {visibleRows.length === 0 && searchTerm !== '' && (
+            <tr>
+              <td colSpan={5} className="player-search-empty">No players match "{search.trim()}"</td>
+            </tr>
+          )}
         </tbody>
       </table>
+
+      {hiddenAgentPlayerCount > 0 && (
+        <p className="nickname-hint player-agent-hidden">
+          {hiddenAgentPlayerCount} player(s) hidden because they are agents or agent players in the Agents list below. They go in the agent tables, where line and rakeback are not used.
+        </p>
+      )}
 
       <button type="button" className="player-add-button" onClick={addRow}>
         + Add player manually
@@ -216,6 +259,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
           Players whose agent in the <code>Member Statistics</code> sheet has this name get their own table, together with the agent.
           Rake % is the agent's share of their total rake and is subtracted from the netto rake.
           Saldo fra før (optional) is the agent's balance from before and is added to their Ny Saldo.
+          The first agents are always included with a fixed Rake %; only their Saldo fra før is entered.
         </p>
         <table className="player-table">
           <thead>
@@ -231,6 +275,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
               const invalid = invalidAgentIds.has(row.id);
               const previousBalanceInvalid = invalid && !/^(-?\d+([.,]\d+)?)?$/.test(row.previousBalanceText.trim());
               const rakeShareInvalid = invalid && row.name.trim() !== '' && !/^\d+([.,]\d+)?$/.test(row.rakeShareText.trim());
+              const known = row.known ? KNOWN_AGENTS.find(agent => agent.name === row.name) : undefined;
               return (
                 <tr key={row.id}>
                   <td>
@@ -241,6 +286,7 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
                       onChange={e => updateAgentRow(row.id, { name: e.target.value })}
                       placeholder="agent nickname"
                       aria-label="Agent nickname"
+                      disabled={row.known}
                     />
                   </td>
                   <td>
@@ -248,11 +294,13 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
                       type="text"
                       inputMode="decimal"
                       className={`player-input player-input-number${rakeShareInvalid ? ' player-input-invalid' : ''}`}
-                      value={row.rakeShareText}
+                      value={known ? rakeShareLabel(known) : row.rakeShareText}
                       onChange={e => updateAgentRow(row.id, { rakeShareText: e.target.value })}
                       placeholder="%"
                       aria-label={`Rake % for ${row.name || 'agent'}`}
                       aria-invalid={rakeShareInvalid}
+                      disabled={row.known}
+                      title={known ? rakeShareLabel(known) : undefined}
                     />
                   </td>
                   <td>
@@ -268,15 +316,17 @@ const NicknameInput: React.FC<NicknameInputProps> = ({
                     />
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="player-delete-button"
-                      onClick={() => onAgentRowsChange(agentRows.filter(r => r.id !== row.id))}
-                      title="Delete agent"
-                      aria-label={`Delete ${row.name || 'agent'}`}
-                    >
-                      ✕
-                    </button>
+                    {!row.known && (
+                      <button
+                        type="button"
+                        className="player-delete-button"
+                        onClick={() => onAgentRowsChange(agentRows.filter(r => r.id !== row.id))}
+                        title="Delete agent"
+                        aria-label={`Delete ${row.name || 'agent'}`}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
