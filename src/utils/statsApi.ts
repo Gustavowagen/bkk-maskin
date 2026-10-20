@@ -27,6 +27,8 @@ export interface PeriodRow {
   extraExpenses: number;
   clubNet: number;
   totalHands: number;
+  bbjContribution: number;
+  bbjPayout: number;
 }
 
 export interface PlayerTotalRow {
@@ -75,6 +77,8 @@ export const savePeriod = async (period: DocumentPeriod, summary: FilterSummary,
       agent_rakeback: summary.agentRakeback,
       extra_expenses: summary.extraExpenses,
       total_hands: summary.totalHands,
+      bbj_contribution: summary.bbjContribution,
+      bbj_payout: summary.bbjPayout,
     },
     p_players: summary.players.map(player => ({
       nickname: player.nickname,
@@ -145,7 +149,7 @@ export const fetchLatestPeriodStart = async (): Promise<string | undefined> => {
 export const fetchPeriods = async (from: string, to: string): Promise<PeriodRow[]> => {
   const { data, error } = await client()
     .from('periods')
-    .select('id, period_start, period_end, brutto_rake, player_rakeback, agent_rakeback, extra_expenses, club_net, total_hands')
+    .select('id, period_start, period_end, brutto_rake, player_rakeback, agent_rakeback, extra_expenses, club_net, total_hands, bbj_contribution, bbj_payout')
     .gte('period_start', from)
     .lte('period_start', to)
     .order('period_start');
@@ -160,6 +164,8 @@ export const fetchPeriods = async (from: string, to: string): Promise<PeriodRow[
     extraExpenses: Number(row.extra_expenses),
     clubNet: Number(row.club_net),
     totalHands: Number(row.total_hands),
+    bbjContribution: Number(row.bbj_contribution),
+    bbjPayout: Number(row.bbj_payout),
   }));
 };
 

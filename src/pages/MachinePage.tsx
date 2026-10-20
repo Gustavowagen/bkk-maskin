@@ -9,7 +9,7 @@ import type { MemberStatistic } from '../utils/excelUtils'
 import { fetchPlayerSheet, findRbSetting } from '../utils/playerNames'
 import type { PlayerSheetData } from '../utils/playerNames'
 import { savePeriod } from '../utils/statsApi'
-import { OWNER_RAKEBACK, isDefaultOwner } from '../types'
+import { KNOWN_AGENTS, OWNER_RAKEBACK, isDefaultOwner } from '../types'
 import type { AgentInput, AgentRow, NicknameWithLine } from '../types'
 
 /**
@@ -42,7 +42,8 @@ const parseAgents = (rows: AgentRow[]): { agents: AgentInput[]; invalidIds: Set<
     }
     // The same agent entered twice only gets one table
     if (agents.some(agent => agent.name.toLowerCase() === name.toLowerCase())) return
-    agents.push({ name, rakeShare: Number(rakeShareText.replace(',', '.')), previousBalance })
+    const known = row.known ? KNOWN_AGENTS.find(agent => agent.name === name) : undefined
+    agents.push({ ...(known ?? { name, rakeShare: Number(rakeShareText.replace(',', '.')) }), previousBalance })
   })
   return { agents, invalidIds }
 }
@@ -62,14 +63,32 @@ function MachinePage() {
   const [isLoadingPlayers, setIsLoadingPlayers] = useState(false)
   // Only the latest upload may fill in the player table
   const uploadIdRef = useRef(0)
-  const [agentRows, setAgentRows] = useState<AgentRow[]>([{ id: 0, name: '', rakeShareText: '', previousBalanceText: '' }])
+  const [agentRows, setAgentRows] = useState<AgentRow[]>(() => [
+    ...KNOWN_AGENTS.map((agent, i): AgentRow => ({ id: i, name: agent.name, rakeShareText: String(agent.rakeShare), previousBalanceText: '', known: true })),
+    { id: KNOWN_AGENTS.length, name: '', rakeShareText: '', previousBalanceText: '' },
+  ])
   // Uncheck when testing, so the statistics are not updated
   const [updateData, setUpdateData] = useState(true)
   const [statsStatus, setStatsStatus] = useState<{ kind: 'saved' | 'skipped' | 'error'; message: string } | null>(null)
 
   const extraExpenses = parseOptionalNumber(extraExpensesText)
-  const { agents, invalidIds: invalidAgentIds } = parseAgents(agentRows)
+  const { agents: enteredAgents, invalidIds: invalidAgentIds } = parseAgents(agentRows)
+  // Remembered agents with no players in this file and no Saldo fra før get no table
+  const agents = enteredAgents.filter(agent =>
+    !KNOWN_AGENTS.some(known => known.name === agent.name) ||
+    agent.previousBalance !== 0 ||
+    findAgentMembers(memberStatistics, agent.name).length > 0
+  )
   const inputInvalid = extraExpenses === undefined || invalidAgentIds.size > 0
+
+  // Agents typed in the agents list and their players go to the agent tables, where line and rakeback
+  // are ignored, so they are hidden from the player table (lowercase nicknames)
+  const agentPlayerNicknames = useMemo(() => new Set(
+    agentRows
+      .map(row => row.name.trim())
+      .filter(name => name !== '')
+      .flatMap(name => findAgentMembers(memberStatistics, name).map(m => m.nickname.trim().toLowerCase()))
+  ), [agentRows, memberStatistics])
 
   // Same styled sheet as the download, shown in the app so cells can be copied straight into Excel
   const sheetPreview = useMemo(() => {
@@ -281,6 +300,7 @@ function MachinePage() {
               agentRows={agentRows}
               onAgentRowsChange={setAgentRows}
               invalidAgentIds={invalidAgentIds}
+              agentPlayerNicknames={agentPlayerNicknames}
             />
 
             <label className="update-data-option">

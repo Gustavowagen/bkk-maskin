@@ -207,6 +207,10 @@ function StatsPage() {
   const previousRakeback = hasPrevious ? sumBy(previousPeriods, totalRakeback) : undefined
   const previousNet = hasPrevious ? sumBy(previousPeriods, p => p.clubNet) : undefined
   const previousExpenses = hasPrevious ? sumBy(previousPeriods, p => p.extraExpenses) : undefined
+  const bbjContribution = sumBy(periods, p => p.bbjContribution)
+  const bbjPayout = sumBy(periods, p => p.bbjPayout)
+  const previousBbjContribution = hasPrevious ? sumBy(previousPeriods, p => p.bbjContribution) : undefined
+  const previousBbjPayout = hasPrevious ? sumBy(previousPeriods, p => p.bbjPayout) : undefined
 
   const weekly = daysBetween(range.from, range.to) > MAX_DAILY_COLUMNS
   const rakeChart = bucketByDate(periods, p => p.periodStart, p => p.bruttoRake, weekly)
@@ -268,6 +272,21 @@ function StatsPage() {
           hint={`${formatPercent(extraExpenses, totalRake)} of rake`}
         />
         <StatTile label="Club net" value={formatCompact(clubNet)} delta={changeVs(clubNet, previousNet, rangeLabel)} />
+      </div>
+
+      <div className="stat-tiles">
+        <StatTile
+          label="Bad beat jackpot contributed"
+          value={formatCompact(bbjContribution)}
+          delta={changeVs(bbjContribution, previousBbjContribution, rangeLabel)}
+          hint={`${formatPercent(bbjContribution, totalRake)} of rake`}
+        />
+        <StatTile
+          label="Bad beat jackpot paid out"
+          value={formatCompact(bbjPayout)}
+          delta={changeVs(bbjPayout, previousBbjPayout, rangeLabel, true)}
+          hint={`Net ${formatCompact(bbjContribution - bbjPayout)}`}
+        />
       </div>
 
       <section className="stats-card">
