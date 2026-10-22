@@ -1,0 +1,1278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crown Pokerklubb Dashboard</title>
+<style>
+/* Theme tokens. These stand in for the claude.ai Dashboard design tokens the page was written against. */
+:root {
+  --color-bg: #f6f7f9; --color-panel: #ffffff; --color-fg: #1d2330; --color-fg-muted: #5e6675;
+  --color-border-line: #e1e4ea; --color-ok: #2f7d4f; --color-warn: #a76b12; --color-bad: #b83b3b;
+  --cds-text-secondary: #5e6675; --cds-border: #d9dde5; --cds-surface-popover: #ffffff;
+  --cds-shadow-popover: 0 6px 20px rgba(20, 28, 45, .12);
+  --cds-chart-grid: #eceef2; --cds-chart-axis: #c4c9d3; --cds-chart-reference: #9aa1ad;
+  --cds-chart-muted: #b9c0cc; --cds-chart-status-critical: #c94a4a;
+  --font-anthropic-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-anthropic-serif: Georgia, "Times New Roman", serif;
+  --cds-font-size-caption: 12px; --cds-font-size-body: 14px; --cds-font-size-heading: 16px; --cds-font-size-title: 28px;
+  --cds-font-weight-medium: 500;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 16px; --cds-gap-lg: 24px; --cds-gap-xl: 32px;
+  --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 16px; --cds-pad-xl: 24px;
+  --cds-radius: 8px; --cds-dur-slow: 240ms; --cds-ease-out: cubic-bezier(.2, .7, .2, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #12151b; --color-panel: #1a1e26; --color-fg: #e8ebf0; --color-fg-muted: #9aa2b1;
+    --color-border-line: #2a303b; --color-ok: #6cc28f; --color-warn: #e0a64a; --color-bad: #ef7c7c;
+    --cds-text-secondary: #9aa2b1; --cds-border: #333a47; --cds-surface-popover: #222733;
+    --cds-shadow-popover: 0 6px 20px rgba(0, 0, 0, .45);
+    --cds-chart-grid: #252b35; --cds-chart-axis: #3a4250; --cds-chart-reference: #6b7382;
+    --cds-chart-muted: #5a6373; --cds-chart-status-critical: #e66a6a;
+    color-scheme: dark;
+  }
+}
+html, body { margin: 0; background: var(--color-bg); color: var(--color-fg); font: 14px/1.45 var(--font-anthropic-sans); }
+#dash-root { max-width: 1280px; margin: 0 auto; padding: 24px max(16px, 3vw) 48px; box-sizing: border-box; }
+[hidden] { display: none !important; }
+.dash-skeleton { color: transparent !important; background: var(--color-border-line); border-radius: 4px; min-width: 3ch; display: inline-block; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="data/data.js"></script>
+<script src="js/dash-shim.js"></script>
+</head>
+<body>
+<div id="dash-root">
+<style>
+.ck{display:flex;flex-direction:column;gap:var(--cds-gap-lg);font-family:var(--font-anthropic-sans)}
+.ck-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:var(--cds-gap-md)}
+.ck-head>div{min-width:0}
+.ck-title{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);margin:0;text-wrap:balance}
+.ck-sub{color:var(--color-fg-muted);font-size:var(--cds-font-size-body);margin:6px 0 0;max-width:72ch;line-height:1.5}
+.ck-sub b,.ck b{font-weight:500;color:var(--color-fg)}
+.ck-seg{display:inline-flex;border:1px solid var(--color-border-line);border-radius:999px;padding:2px;gap:2px}
+.ck-seg button{border:0;background:transparent;color:var(--color-fg-muted);font:inherit;font-size:var(--cds-font-size-caption);padding:5px 12px;border-radius:999px;cursor:pointer}
+.ck-seg button[aria-pressed="true"]{background:var(--color-panel);color:var(--color-fg);box-shadow:inset 0 0 0 1px var(--color-border-line)}
+.ck-seg button:focus-visible,.ck-tabs button:focus-visible,.ck-tbl th button:focus-visible{outline:2px solid var(--color-fg);outline-offset:1px}
+.ck-tabs{display:flex;gap:var(--cds-gap-xs);border-bottom:1px solid var(--color-border-line);overflow-x:auto}
+.ck-tabs button{border:0;background:transparent;font:inherit;font-size:var(--cds-font-size-body);color:var(--color-fg-muted);padding:8px 12px;border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;white-space:nowrap}
+.ck-tabs button[aria-selected="true"]{color:var(--color-fg);border-bottom-color:var(--color-fg)}
+.ck-page{display:flex;flex-direction:column;gap:var(--cds-gap-md)}
+.ck-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr));gap:var(--cds-gap-md)}
+.ck-kpi{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-md) var(--cds-pad-lg);display:flex;flex-direction:column;gap:4px;min-width:0}
+.ck-kpi .l{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ck-kpi .v{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);font-variant-numeric:tabular-nums;line-height:1.15}
+.ck-kpi .n{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ck-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr));gap:var(--cds-gap-md)}
+.ck-card{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-lg);min-width:0;display:flex;flex-direction:column}
+.ck-card h3{font-size:var(--cds-font-size-heading);font-weight:var(--cds-font-weight-medium);margin:0}
+.ck-note{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin:4px 0 var(--cds-gap-md);line-height:1.45}
+.ck-wide{grid-column:1/-1}
+.ck-chart{position:relative;min-height:240px}
+.ck-chart svg{display:block;overflow:visible}
+.ck-chart text{fill:var(--color-fg-muted);font-size:var(--cds-font-size-caption);font-family:var(--font-anthropic-sans)}
+.ck-legend{display:flex;flex-wrap:wrap;gap:var(--cds-gap-md);font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin-bottom:var(--cds-gap-sm)}
+.ck-legend span{display:inline-flex;align-items:center;gap:6px}
+.ck-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.ck-tip{position:absolute;background:var(--cds-surface-popover);border:1px solid var(--cds-border);border-radius:var(--cds-radius);box-shadow:var(--cds-shadow-popover);padding:var(--cds-pad-xs) var(--cds-pad-sm);font-size:var(--cds-font-size-caption);pointer-events:none;z-index:5;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ck-tip .t{color:var(--cds-text-secondary);margin-bottom:2px}
+.ck-tip .r{display:flex;align-items:center;gap:6px}
+.ck-tip .r i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.ck-tip .r em{font-style:normal;margin-left:auto;padding-left:12px;color:var(--color-fg)}
+.ck-tools{display:flex;flex-wrap:wrap;gap:var(--cds-gap-sm);align-items:center;margin-bottom:var(--cds-gap-sm)}
+.ck-tools input{font:inherit;font-size:var(--cds-font-size-caption);padding:6px 10px;border:1px solid var(--color-border-line);border-radius:var(--cds-radius);background:var(--color-bg);color:var(--color-fg);min-width:0;flex:1 1 12rem;max-width:20rem}
+.ck-tools label{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);display:inline-flex;gap:6px;align-items:center}
+.ck-tbl-wrap{max-height:520px;overflow:auto}
+table.ck-tbl{width:100%;border-collapse:collapse;font-size:var(--cds-font-size-caption);font-variant-numeric:tabular-nums}
+.ck-tbl th{position:sticky;top:0;background:var(--color-panel);text-align:left;font-weight:500;color:var(--color-fg-muted);border-bottom:1px solid var(--color-border-line);padding:0;z-index:1}
+.ck-tbl th button{all:unset;cursor:pointer;display:block;padding:6px 8px;width:100%;box-sizing:border-box}
+.ck-tbl th.num,.ck-tbl td.num{text-align:right}
+.ck-tbl td{padding:6px 8px;border-bottom:1px solid var(--color-border-line);white-space:nowrap}
+.ck-tbl tr:last-child td{border-bottom:0}
+.ck-tbl td.who{max-width:14rem;overflow:hidden;text-overflow:ellipsis}
+.ck-pos{color:var(--color-ok)}
+.ck-neg{color:var(--color-bad)}
+.ck-bar{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.ck-bar i{display:inline-block;height:8px;border-radius:4px;background:var(--cds-chart-muted)}
+.ck-pill{display:inline-block;padding:1px 7px;border-radius:999px;border:1px solid var(--color-border-line);color:var(--color-fg-muted);font-size:11px}
+.ck-fail{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--color-fg-muted);font-size:var(--cds-font-size-caption);min-height:inherit}
+.ck-fail::before{content:"";width:.375rem;height:.375rem;border-radius:50%;background:var(--color-bad)}
+[data-dash-source-state=empty]{color:transparent}
+[data-dash-source-state=refreshing]{opacity:.5;transition:opacity var(--cds-dur-slow)}
+.ck-click tbody tr{cursor:pointer}
+.ck-click tbody tr:hover td{background:var(--color-bg)}
+.ck-click tbody tr:focus-visible{outline:2px solid var(--color-fg);outline-offset:-2px}
+.ck-tbl tbody tr.ck-sel td{background:var(--color-bg);font-weight:500}
+.ck-sample{display:inline-block;vertical-align:middle;margin-left:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--color-border-line);font-family:var(--font-anthropic-sans);font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ck-pickbar{display:flex;flex-wrap:wrap;gap:var(--cds-gap-sm) var(--cds-gap-md);align-items:center}
+.ck-pickbar label{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ck-pickbar select{font:inherit;font-size:var(--cds-font-size-body);padding:6px 10px;border:1px solid var(--color-border-line);border-radius:var(--cds-radius);background:var(--color-panel);color:var(--color-fg);min-width:0;max-width:100%}
+.ck-who{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--cds-gap-xs) var(--cds-gap-md)}
+.ck-who h2{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);margin:0;overflow-wrap:anywhere}
+.ck-who .meta{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ck-linkbtn{all:unset;cursor:pointer;color:var(--color-fg);text-decoration:underline;text-underline-offset:2px}
+.ck-linkbtn:focus-visible{outline:2px solid var(--color-fg)}
+.ck-split{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:var(--cds-gap-sm)}
+.ck-split div{display:flex;flex-direction:column;gap:2px;padding:var(--cds-pad-sm) 0;border-top:1px solid var(--color-border-line)}
+.ck-split span{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.ck-split b{font-size:var(--cds-font-size-heading);font-variant-numeric:tabular-nums}
+.ck-empty{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);padding:var(--cds-pad-md) 0}
+@media (max-width:640px){.ck-hide-sm{display:none}}
+</style>
+
+<div class="ck">
+  <header class="ck-head" id="top">
+    <div>
+      <h1 class="ck-title">Crown Pokerklubb · 12–18 Oct 2026<span class="ck-sample">Sample data</span></h1>
+      <p class="ck-sub" id="takeaway">
+        <b class="dash-skeleton" data-source="kpis" data-field="fees" data-row="0">—</b> collected in rake and fees from
+        <b class="dash-skeleton" data-source="kpis" data-field="activePlayers" data-row="0">—</b> active players.
+        PLO5 tables brought in <b class="dash-skeleton" data-source="kpis" data-field="ploShare" data-row="0">—</b> of ring rake,
+        and the 10 biggest payers account for <b class="dash-skeleton" data-source="kpis" data-field="top10Share" data-row="0">—</b> of all fees.
+      </p>
+    </div>
+    <div class="ck-seg" role="group" aria-label="Clock" id="tz-toggle">
+      <button type="button" data-tz="oslo" aria-pressed="true">Oslo time</button>
+      <button type="button" data-tz="club" aria-pressed="false">Export time (UTC−7)</button>
+    </div>
+  </header>
+
+  <nav class="ck-tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" id="tab-overview" data-page="overview" aria-selected="true">Overview</button>
+    <button type="button" role="tab" id="tab-tables" data-page="tables" aria-selected="false">Tables</button>
+    <button type="button" role="tab" id="tab-players" data-page="players" aria-selected="false">Players</button>
+    <button type="button" role="tab" id="tab-profile" data-page="profile" aria-selected="false">Player profile</button>
+    <button type="button" role="tab" id="tab-agents" data-page="agents" aria-selected="false">Agents</button>
+    <button type="button" role="tab" id="tab-tournament" data-page="tournament" aria-selected="false">Tournament</button>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <section class="ck-page" id="overview" data-page-body="overview">
+    <div class="ck-kpis">
+      <div class="ck-kpi"><span class="l">Rake &amp; fees</span><span class="v dash-skeleton" data-source="kpis" data-field="fees" data-row="0">—</span><span class="n">Ring rake + MTT re-entry fees</span></div>
+      <div class="ck-kpi"><span class="l">Ring sessions</span><span class="v dash-skeleton" data-source="kpis" data-field="sessions" data-row="0">—</span><span class="n">Tables opened this week</span></div>
+      <div class="ck-kpi"><span class="l">Table hours</span><span class="v dash-skeleton" data-source="kpis" data-field="tableHours" data-row="0">—</span><span class="n">Sum of session lengths</span></div>
+      <div class="ck-kpi"><span class="l">Rake per table hour</span><span class="v dash-skeleton" data-source="kpis" data-field="rakePerHour" data-row="0">—</span><span class="n">Ring rake ÷ table hours</span></div>
+      <div class="ck-kpi"><span class="l">Hands played</span><span class="v dash-skeleton" data-source="kpis" data-field="hands" data-row="0">—</span><span class="n">Ring, counted per seat</span></div>
+      <div class="ck-kpi"><span class="l">Active players</span><span class="v dash-skeleton" data-source="kpis" data-field="activePlayers" data-row="0">—</span><span class="n">of <span data-source="kpis" data-field="members" data-row="0">—</span> members</span></div>
+    </div>
+    <div class="ck-grid">
+      <div class="ck-card" id="card-daily">
+        <h3>Ring rake per day</h3>
+        <p class="ck-note">Each session counts on the night it opened. Hover a bar for the split.</p>
+        <div class="ck-legend" data-source="daily"><span><i style="background:var(--ck-c0)"></i>NLH</span><span><i style="background:var(--ck-c1)"></i>PLO5</span></div>
+        <div class="ck-chart" id="chart-daily" data-source="daily"></div>
+      </div>
+      <div class="ck-card" id="card-heat">
+        <h3>When the tables run</h3>
+        <p class="ck-note">Average number of tables open in each hour, by night of the week. Hours after midnight belong to the night before.</p>
+        <div class="ck-chart" id="chart-heat" data-source="heat"></div>
+      </div>
+      <div class="ck-card ck-wide" id="card-stakes">
+        <h3>Results by stake</h3>
+        <p class="ck-note">Ring games grouped by game and blinds. Rake per hour shows which tables earn the most while they run.</p>
+        <div class="ck-tbl-wrap">
+          <table class="ck-tbl" id="tbl-stakes" data-source="by_stake" data-row-key="stake">
+            <thead><tr>
+              <th data-field="stake"><button type="button">Stake</button></th>
+              <th class="num" data-field="sessions"><button type="button">Sessions</button></th>
+              <th class="num ck-hide-sm" data-field="hours"><button type="button">Hours</button></th>
+              <th class="num ck-hide-sm" data-field="avgPlayers"><button type="button">Avg players</button></th>
+              <th class="num ck-hide-sm" data-field="hands"><button type="button">Hands</button></th>
+              <th class="num" data-field="rakePerHour"><button type="button">Rake / hour</button></th>
+              <th class="num" data-field="rake"><button type="button">Rake</button></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TABLES -->
+  <section class="ck-page" id="tables" data-page-body="tables" hidden>
+    <div class="ck-card" id="card-gantt">
+      <h3>Every table, night by night</h3>
+      <p class="ck-note">One bar per ring session, from open to close. Overlapping tables stack. Hover for players, hands and rake.</p>
+      <div class="ck-legend" data-source="sessions"><span><i style="background:var(--ck-c0)"></i>NLH</span><span><i style="background:var(--ck-c1)"></i>PLO5</span></div>
+      <div class="ck-chart" id="chart-gantt" data-source="sessions" style="min-height:360px"></div>
+    </div>
+    <div class="ck-card" id="card-sessions">
+      <h3>Biggest sessions</h3>
+      <p class="ck-note">Ring sessions ranked by rake. Sort by any column.</p>
+      <div class="ck-tbl-wrap">
+        <table class="ck-tbl" id="tbl-sessions" data-source="sessions" data-row-key="session">
+          <thead><tr>
+            <th class="num" data-field="session"><button type="button">#</button></th>
+            <th data-field="table"><button type="button">Table</button></th>
+            <th class="ck-hide-sm" data-field="start"><button type="button">Opened</button></th>
+            <th class="num ck-hide-sm" data-field="minutes"><button type="button">Minutes</button></th>
+            <th class="num" data-field="players"><button type="button">Players</button></th>
+            <th class="num ck-hide-sm" data-field="hands"><button type="button">Hands</button></th>
+            <th class="num" data-field="rake"><button type="button">Rake</button></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYERS -->
+  <section class="ck-page" id="players" data-page-body="players" hidden>
+    <div class="ck-grid">
+      <div class="ck-card" id="card-toprake">
+        <h3>Top rake contributors</h3>
+        <p class="ck-note">The 15 members who paid the most rake and fees this week. Click a bar to open the profile.</p>
+        <div class="ck-chart" id="chart-toprake" data-source="members" style="min-height:400px"></div>
+      </div>
+      <div class="ck-card" id="card-pnl">
+        <h3>Biggest winners and losers</h3>
+        <p class="ck-note">Net result for the week across all games, after rake. Click a bar to open the profile.</p>
+        <div class="ck-chart" id="chart-pnl" data-source="members" style="min-height:400px"></div>
+      </div>
+    </div>
+    <div class="ck-card" id="card-members">
+      <h3>All members</h3>
+      <p class="ck-note">Week totals per member, with chip balance at export. Search by name or ID, and click a row to open the profile.</p>
+      <div class="ck-tools">
+        <input type="search" id="member-search" placeholder="Search players" aria-label="Search players">
+        <label><input type="checkbox" id="member-active" checked> Only members who played</label>
+      </div>
+      <div class="ck-tbl-wrap">
+        <table class="ck-tbl" id="tbl-members" data-source="members" data-row-key="id">
+          <thead><tr>
+            <th data-field="player"><button type="button">Player</button></th>
+            <th class="ck-hide-sm" data-field="role"><button type="button">Role</button></th>
+            <th class="ck-hide-sm" data-field="agent"><button type="button">Agent</button></th>
+            <th class="num ck-hide-sm" data-field="games"><button type="button">Games</button></th>
+            <th class="num" data-field="hands"><button type="button">Hands</button></th>
+            <th class="num" data-field="fee"><button type="button">Rake &amp; fees</button></th>
+            <th class="num" data-field="pnl"><button type="button">Net</button></th>
+            <th class="num ck-hide-sm" data-field="chips"><button type="button">Balance</button></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYER PROFILE -->
+  <section class="ck-page" id="profile" data-page-body="profile" hidden>
+    <div class="ck-pickbar">
+      <label for="prof-select">Player</label>
+      <select id="prof-select" data-source="members"></select>
+    </div>
+    <div class="ck-who" id="prof-who">
+      <h2 class="dash-skeleton" data-source="members" data-field="player">—</h2>
+      <div class="meta">
+        <span data-source="members" data-field="id">—</span>
+        <span class="ck-pill" data-source="members" data-field="role">—</span>
+        <span>Agent: <button type="button" class="ck-linkbtn" id="prof-agent" data-source="members" data-field="agent">—</button></span>
+      </div>
+    </div>
+    <div class="ck-kpis">
+      <div class="ck-kpi"><span class="l">Net result</span><span class="v dash-skeleton" data-source="members" data-field="pnl">—</span><span class="n">All games, after rake</span></div>
+      <div class="ck-kpi"><span class="l">Rake &amp; fees paid</span><span class="v dash-skeleton" data-source="members" data-field="fee">—</span><span class="n">Ring rake + tournament fees</span></div>
+      <div class="ck-kpi"><span class="l">Hands</span><span class="v dash-skeleton" data-source="members" data-field="hands">—</span><span class="n">Ring and tournament</span></div>
+      <div class="ck-kpi"><span class="l">Ring sessions</span><span class="v dash-skeleton" data-source="player_stats" data-field="sessions">—</span><span class="n"><span data-source="player_stats" data-field="winShare">—</span> ended in profit</span></div>
+      <div class="ck-kpi"><span class="l">Chip balance</span><span class="v dash-skeleton" data-source="members" data-field="chips">—</span><span class="n">At export</span></div>
+    </div>
+    <div class="ck-grid">
+      <div class="ck-card ck-wide" id="card-prof-run">
+        <h3>Running result through the week</h3>
+        <p class="ck-note">Ring-game net added up session by session. Hover a point for the session.</p>
+        <div class="ck-chart" id="chart-prof-run" data-source="player_sessions"></div>
+      </div>
+      <div class="ck-card" id="card-prof-game">
+        <h3>Result by game</h3>
+        <p class="ck-note">Net per game type this week.</p>
+        <div class="ck-chart" id="chart-prof-game" data-source="members" style="min-height:120px"></div>
+      </div>
+      <div class="ck-card" id="card-prof-style">
+        <h3>How they play</h3>
+        <p class="ck-note">Ring-game habits worked out from every session.</p>
+        <div class="ck-split">
+          <div><span>Favourite stake</span><b data-source="player_stats" data-field="favStake">—</b></div>
+          <div><span>Average buy-in</span><b data-source="player_stats" data-field="avgBuyin">—</b></div>
+          <div><span>Total bought in</span><b data-source="player_stats" data-field="buyin">—</b></div>
+          <div><span>Biggest win</span><b data-source="player_stats" data-field="biggestWin">—</b></div>
+          <div><span>Biggest loss</span><b data-source="player_stats" data-field="biggestLoss">—</b></div>
+          <div><span>Rake per 100 hands</span><b data-source="player_stats" data-field="rakePer100">—</b></div>
+          <div><span>Tournament prize</span><b data-source="mtt_results" data-field="prize">—</b></div>
+          <div><span>Tournament net</span><b data-source="mtt_results" data-field="net">—</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="ck-card" id="card-prof-sessions">
+      <h3>Session history</h3>
+      <p class="ck-note">Every ring session this player sat in.</p>
+      <div class="ck-tbl-wrap">
+        <table class="ck-tbl" id="tbl-prof" data-source="player_sessions" data-row-key="session,id">
+          <thead><tr>
+            <th class="num" data-field="session"><button type="button">#</button></th>
+            <th data-field="start"><button type="button">Opened</button></th>
+            <th data-field="stake"><button type="button">Stake</button></th>
+            <th class="num ck-hide-sm" data-field="buyin"><button type="button">Buy-in</button></th>
+            <th class="num ck-hide-sm" data-field="cashout"><button type="button">Cashout</button></th>
+            <th class="num" data-field="hands"><button type="button">Hands</button></th>
+            <th class="num ck-hide-sm" data-field="rake"><button type="button">Rake</button></th>
+            <th class="num" data-field="pnl"><button type="button">Net</button></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="ck-empty" id="prof-none" hidden>No ring sessions this week.</p>
+    </div>
+  </section>
+
+  <!-- AGENTS -->
+  <section class="ck-page" id="agents" data-page-body="agents" hidden>
+    <div class="ck-pickbar">
+      <label for="agent-select">Agent</label>
+      <select id="agent-select" data-source="agents"></select>
+    </div>
+    <div class="ck-who">
+      <h2 class="dash-skeleton" data-source="agents" data-field="agent">—</h2>
+      <div class="meta"><span class="ck-pill" data-source="agents" data-field="role">—</span><span>Downline includes the agent's own account</span></div>
+    </div>
+    <div class="ck-kpis">
+      <div class="ck-kpi"><span class="l">Rake &amp; fees generated</span><span class="v dash-skeleton" data-source="agents" data-field="fee">—</span><span class="n">By the whole downline</span></div>
+      <div class="ck-kpi"><span class="l">Players' net</span><span class="v dash-skeleton" data-source="agents" data-field="pnl">—</span><span class="n">Negative: downline lost to the tables</span></div>
+      <div class="ck-kpi"><span class="l">Members</span><span class="v dash-skeleton" data-source="agents" data-field="players">—</span><span class="n"><span data-source="agents" data-field="active">—</span> played this week</span></div>
+      <div class="ck-kpi"><span class="l">Hands</span><span class="v dash-skeleton" data-source="agents" data-field="hands">—</span><span class="n">Ring and tournament</span></div>
+      <div class="ck-kpi"><span class="l">Chips held</span><span class="v dash-skeleton" data-source="agents" data-field="chips">—</span><span class="n">Downline balances at export</span></div>
+    </div>
+    <div class="ck-grid">
+      <div class="ck-card" id="card-agent-daily">
+        <h3>Downline rake per day</h3>
+        <p class="ck-note">Ring rake paid by this agent's players each night. Hover for their net and hands.</p>
+        <div class="ck-chart" id="chart-agent-daily" data-source="agent_daily"></div>
+      </div>
+      <div class="ck-card" id="card-agent-down">
+        <h3>Downline players</h3>
+        <p class="ck-note">Click a player to open their profile.</p>
+        <div class="ck-tbl-wrap">
+          <table class="ck-tbl" id="tbl-down" data-source="members" data-row-key="id">
+            <thead><tr>
+              <th data-field="player"><button type="button">Player</button></th>
+              <th class="num" data-field="hands"><button type="button">Hands</button></th>
+              <th class="num" data-field="fee"><button type="button">Rake &amp; fees</button></th>
+              <th class="num" data-field="pnl"><button type="button">Net</button></th>
+              <th class="num ck-hide-sm" data-field="chips"><button type="button">Balance</button></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="ck-card" id="card-agents">
+      <h3>All agents compared</h3>
+      <p class="ck-note">Every agent and super agent with their downline's week. "Direct" is members with no agent. Click a row to review that agent.</p>
+      <div class="ck-tbl-wrap">
+        <table class="ck-tbl" id="tbl-agents" data-source="agents" data-row-key="agent">
+          <thead><tr>
+            <th data-field="agent"><button type="button">Agent</button></th>
+            <th class="ck-hide-sm" data-field="role"><button type="button">Role</button></th>
+            <th class="num" data-field="players"><button type="button">Members</button></th>
+            <th class="num" data-field="active"><button type="button">Active</button></th>
+            <th class="num ck-hide-sm" data-field="hands"><button type="button">Hands</button></th>
+            <th class="num" data-field="fee"><button type="button">Rake &amp; fees</button></th>
+            <th class="num" data-field="pnl"><button type="button">Players' net</button></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- TOURNAMENT -->
+  <section class="ck-page" id="tournament" data-page-body="tournament" hidden>
+    <div class="ck-kpis">
+      <div class="ck-kpi"><span class="l">Tournament</span><span class="v dash-skeleton" data-source="mtt" data-field="title" data-row="0" style="font-size:var(--cds-font-size-heading)">—</span><span class="n" id="mtt-when">—</span></div>
+      <div class="ck-kpi"><span class="l">Entries</span><span class="v dash-skeleton" data-source="mtt" data-field="entries" data-row="0">—</span><span class="n">Unlimited re-entry</span></div>
+      <div class="ck-kpi"><span class="l">Guarantee paid out</span><span class="v dash-skeleton" data-source="mtt" data-field="prizePaid" data-row="0">—</span><span class="n">Freeroll, no buy-in</span></div>
+      <div class="ck-kpi"><span class="l">Club overlay</span><span class="v dash-skeleton" data-source="mtt" data-field="overlay" data-row="0">—</span><span class="n">Guarantee minus re-entry money</span></div>
+      <div class="ck-kpi"><span class="l">Re-entry fees</span><span class="v dash-skeleton" data-source="mtt" data-field="reentryFee" data-row="0">—</span><span class="n">Kept by the club</span></div>
+    </div>
+    <div class="ck-card" id="card-mtt">
+      <h3>Prize list</h3>
+      <p class="ck-note">Everyone who cashed or re-entered. Net is prize minus re-entries paid.</p>
+      <div class="ck-tbl-wrap">
+        <table class="ck-tbl" id="tbl-mtt" data-source="mtt_results" data-row-key="id">
+          <thead><tr>
+            <th data-field="player"><button type="button">Player</button></th>
+            <th class="num ck-hide-sm" data-field="hands"><button type="button">Hands</button></th>
+            <th class="num" data-field="reentries"><button type="button">Re-entries paid</button></th>
+            <th class="num" data-field="prize"><button type="button">Prize</button></th>
+            <th class="num" data-field="net"><button type="button">Net</button></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ---------- calculations ---------- */
+dash.calc('kpis', {
+  inputs: ['members', 'sessions'],
+  title: 'Week totals',
+  description: 'Fees summed over members; ring sessions, hours, hands and rake summed over sessions; PLO5 share of ring rake; top-10 payers share of all fees.',
+  fn: (members, sessions) => {
+    const sum = (rows, f) => rows.reduce((t, r) => t + Number(r[f]), 0);
+    const fees = sum(members, 'fee');
+    const ringRake = sum(sessions, 'rake');
+    const tableHours = sum(sessions, 'minutes') / 60;
+    const plo = sum(sessions.filter((s) => s.game === 'PLO5'), 'rake');
+    const top10 = members.map((m) => Number(m.fee)).sort((a, b) => b - a).slice(0, 10).reduce((a, b) => a + b, 0);
+    return [{
+      fees: Math.round(fees), ringRake: Math.round(ringRake), sessions: sessions.length,
+      tableHours: Math.round(tableHours), rakePerHour: Math.round(ringRake / tableHours),
+      hands: sum(sessions, 'hands'), activePlayers: members.filter((m) => Number(m.hands) > 0).length,
+      members: members.length, ploShare: Math.round((plo / ringRake) * 1000) / 1000,
+      top10Share: Math.round((top10 / fees) * 1000) / 1000,
+    }];
+  },
+});
+
+dash.calc('daily', {
+  inputs: ['sessions'],
+  title: 'Ring rake per night',
+  description: 'Ring rake, hands and sessions summed by the date each session opened (export clock) and game.',
+  fn: (sessions) => {
+    const m = new Map();
+    for (const s of sessions) {
+      const day = s.start.slice(0, 10);
+      const k = day + '|' + s.game;
+      const r = m.get(k) || { day, game: s.game, rake: 0, hands: 0, sessions: 0 };
+      r.rake += s.rake; r.hands += s.hands; r.sessions += 1;
+      m.set(k, r);
+    }
+    return [...m.values()].map((r) => ({ ...r, rake: Math.round(r.rake * 100) / 100 }))
+      .sort((a, b) => (a.day + a.game < b.day + b.game ? -1 : 1));
+  },
+});
+
+dash.calc('heat', {
+  inputs: ['sessions'],
+  title: 'Open tables by hour',
+  description: 'Each session split into clock hours (Oslo = export time + 9 h); table-hours summed per night of the week and hour. A night runs 06:00 to 06:00.',
+  fn: (sessions) => {
+    const offsets = { oslo: 9, club: 0 };
+    const H = 3600e3;
+    const out = new Map();
+    for (const tz of Object.keys(offsets)) {
+      for (const s of sessions) {
+        const a = Date.parse(s.start.replace(' ', 'T') + 'Z') + offsets[tz] * H;
+        const b = Date.parse(s.end.replace(' ', 'T') + 'Z') + offsets[tz] * H;
+        for (let t = Math.floor(a / H) * H; t < b; t += H) {
+          const part = (Math.min(b, t + H) - Math.max(a, t)) / H;
+          if (part <= 0) continue;
+          const weekday = (new Date(t - 6 * H).getUTCDay() + 6) % 7;
+          const hour = new Date(t).getUTCHours();
+          const slot = (hour + 18) % 24;
+          const k = tz + '|' + weekday + '|' + slot;
+          const r = out.get(k) || { tz, weekday, slot, hour, tableHours: 0 };
+          r.tableHours += part;
+          out.set(k, r);
+        }
+      }
+    }
+    return [...out.values()].map((r) => ({ ...r, tableHours: Math.round(r.tableHours * 100) / 100 }));
+  },
+});
+
+dash.calc('by_stake', {
+  inputs: ['sessions'],
+  title: 'Results by stake',
+  description: 'Ring sessions grouped by game and blinds: count, hours, hands, rake, rake per hour and average players.',
+  fn: (sessions) => {
+    const m = new Map();
+    for (const s of sessions) {
+      const r = m.get(s.stake) || { stake: s.stake, sessions: 0, minutes: 0, hands: 0, rake: 0, seats: 0 };
+      r.sessions += 1; r.minutes += s.minutes; r.hands += s.hands; r.rake += s.rake; r.seats += s.players;
+      m.set(s.stake, r);
+    }
+    return [...m.values()].map((r) => ({
+      stake: r.stake, sessions: r.sessions, hours: Math.round(r.minutes / 6) / 10, hands: r.hands,
+      rake: Math.round(r.rake * 100) / 100, rakePerHour: Math.round(r.rake / (r.minutes / 60)),
+      avgPlayers: Math.round((r.seats / r.sessions) * 10) / 10,
+    })).sort((a, b) => b.rake - a.rake);
+  },
+});
+
+dash.calc('agents', {
+  inputs: ['members'],
+  title: 'Agent downlines',
+  description: 'For each agent and super agent: the members under them plus their own account, with activity, rake and fees, players’ net and chip balances. Members with no agent form "Direct".',
+  fn: (members) => {
+    const names = new Set();
+    for (const m of members) { if (m.agent !== 'Direct') names.add(m.agent); if (m.superAgent) names.add(m.superAgent); }
+    const owners = (m) => {
+      const o = new Set();
+      if (m.agent !== 'Direct') o.add(m.agent);
+      if (m.superAgent) o.add(m.superAgent);
+      if (names.has(m.player)) o.add(m.player);
+      if (!o.size) o.add('Direct');
+      return o;
+    };
+    return [...names, 'Direct'].map((agent) => {
+      const self = members.find((m) => m.player === agent);
+      const down = members.filter((m) => owners(m).has(agent));
+      const s = (f) => Math.round(down.reduce((t, m) => t + m[f], 0) * 100) / 100;
+      return {
+        agent, role: agent === 'Direct' ? 'No agent' : (self ? self.role : 'Agent'),
+        players: down.length, active: down.filter((m) => m.hands > 0).length,
+        hands: s('hands'), fee: s('fee'), pnl: s('pnl'), chips: s('chips'),
+      };
+    }).sort((a, b) => (a.agent === 'Direct') - (b.agent === 'Direct') || b.fee - a.fee);
+  },
+});
+
+dash.calc('agent_daily', {
+  inputs: ['player_sessions', 'members'],
+  title: 'Downline rake per night',
+  description: 'Ring rake, players’ net and hands per agent downline (same membership rule as Agent downlines), by the date each session opened.',
+  fn: (player_sessions, members) => {
+    const names = new Set();
+    for (const m of members) { if (m.agent !== 'Direct') names.add(m.agent); if (m.superAgent) names.add(m.superAgent); }
+    const byId = new Map(members.map((m) => [m.id, m]));
+    const out = new Map();
+    for (const p of player_sessions) {
+      const m = byId.get(p.id);
+      if (!m) continue;
+      const o = new Set();
+      if (m.agent !== 'Direct') o.add(m.agent);
+      if (m.superAgent) o.add(m.superAgent);
+      if (names.has(m.player)) o.add(m.player);
+      if (!o.size) o.add('Direct');
+      const day = p.start.slice(0, 10);
+      for (const agent of o) {
+        const k = agent + '|' + day;
+        const r = out.get(k) || { agent, day, rake: 0, pnl: 0, hands: 0, seats: 0 };
+        r.rake += p.rake; r.pnl += p.pnl; r.hands += p.hands; r.seats += 1;
+        out.set(k, r);
+      }
+    }
+    return [...out.values()].map((r) => ({ ...r, rake: Math.round(r.rake * 100) / 100, pnl: Math.round(r.pnl * 100) / 100 }))
+      .sort((a, b) => (a.day < b.day ? -1 : 1));
+  },
+});
+
+dash.calc('player_stats', {
+  inputs: ['player_sessions'],
+  title: 'Player ring-game profile',
+  description: 'Per player across ring sessions: sessions, share that ended in profit, total and average buy-in, biggest win and loss, most played stake and rake per 100 hands.',
+  fn: (player_sessions) => {
+    const m = new Map();
+    for (const p of player_sessions) {
+      const r = m.get(p.id) || { id: p.id, player: p.player, sessions: 0, wins: 0, hands: 0, rake: 0, buyin: 0, best: -Infinity, worst: Infinity, stakes: {} };
+      r.sessions += 1; r.wins += p.pnl > 0 ? 1 : 0; r.hands += p.hands; r.rake += p.rake; r.buyin += p.buyin;
+      r.best = Math.max(r.best, p.pnl); r.worst = Math.min(r.worst, p.pnl);
+      r.stakes[p.stake] = (r.stakes[p.stake] || 0) + 1;
+      m.set(p.id, r);
+    }
+    return [...m.values()].map((r) => ({
+      id: r.id, player: r.player, sessions: r.sessions,
+      winShare: Math.round((r.wins / r.sessions) * 1000) / 1000,
+      buyin: Math.round(r.buyin * 100) / 100, avgBuyin: Math.round(r.buyin / r.sessions),
+      biggestWin: Math.max(0, Math.round(r.best * 100) / 100), biggestLoss: Math.min(0, Math.round(r.worst * 100) / 100),
+      favStake: Object.entries(r.stakes).sort((a, b) => b[1] - a[1])[0][0],
+      rakePer100: r.hands ? Math.round((r.rake / r.hands) * 10000) / 100 : 0,
+    }));
+  },
+});
+
+/* ---------- shared helpers ---------- */
+window.ck = (() => {
+  const root = document.querySelector('.ck');
+  root.style.setProperty('--ck-c0', dash.colors[0]);
+  root.style.setProperty('--ck-c1', dash.colors[1]);
+  const fmt0 = d3.format(',.0f');
+  const fmt2 = d3.format(',.2~f');
+  const signed = (v) => (v > 0 ? '+' : '') + fmt2(v);
+  const pct = d3.format('.1%');
+  const H = 3600e3;
+  const shift = (s, tz) => new Date(Date.parse(s.replace(' ', 'T') + 'Z') + (tz === 'oslo' ? 9 : 0) * H);
+  const hhmm = d3.utcFormat('%H:%M');
+  const dayName = d3.utcFormat('%a %-d %b');
+  const tzName = (tz) => (tz === 'oslo' ? 'Oslo time' : 'export time');
+
+  const tip = (box) => {
+    let el = box.querySelector(':scope > .ck-tip');
+    if (!el) { el = document.createElement('div'); el.className = 'ck-tip'; el.hidden = true; box.appendChild(el); }
+    return {
+      show(event, title, lines) {
+        el.replaceChildren();
+        const t = document.createElement('div'); t.className = 't'; t.textContent = title; el.appendChild(t);
+        for (const ln of lines) {
+          const r = document.createElement('div'); r.className = 'r';
+          if (ln.color) { const i = document.createElement('i'); i.style.background = ln.color; r.appendChild(i); }
+          const s = document.createElement('span'); s.textContent = ln.label; r.appendChild(s);
+          const e = document.createElement('em'); e.textContent = ln.value; r.appendChild(e);
+          el.appendChild(r);
+        }
+        el.hidden = false;
+        const [x, y] = d3.pointer(event, box);
+        const w = el.offsetWidth, h = el.offsetHeight, bw = box.clientWidth;
+        let left = x + 12; if (left + w > bw) left = Math.max(0, x - w - 12);
+        let top = y - h - 8; if (top < 0) top = y + 14;
+        el.style.left = left + 'px'; el.style.top = top + 'px';
+      },
+      hide() { el.hidden = true; },
+    };
+  };
+
+  const fail = (box, d) => {
+    box.querySelectorAll(':scope > svg, :scope > .ck-fail').forEach((n) => n.remove());
+    if (d.status === 'error') {
+      const f = document.createElement('div'); f.className = 'ck-fail'; f.textContent = 'Failed to load'; box.appendChild(f);
+    }
+  };
+
+  const cleanAxis = (g) => g.attr('font-size', null).attr('font-family', null)
+    .call((s) => s.select('.domain').attr('stroke', 'var(--cds-chart-axis)'))
+    .call((s) => s.selectAll('.tick line').attr('stroke', 'var(--cds-chart-grid)'));
+
+  const measure = (svg, texts) => {
+    const t = svg.append('text').attr('font-size', 'var(--cds-font-size-caption)');
+    let w = 0;
+    for (const s of texts) { t.text(s); w = Math.max(w, t.node().getComputedTextLength()); }
+    t.remove();
+    return w;
+  };
+
+  /* sortable table */
+  const sortState = {};
+  const table = (id, rows, opts) => {
+    const tbl = document.getElementById(id);
+    const st = sortState[id] || (sortState[id] = { key: opts.sort, dir: -1 });
+    const ths = [...tbl.querySelectorAll('th')];
+    if (!tbl.dataset.wired) {
+      tbl.dataset.wired = '1';
+      ths.forEach((th) => th.querySelector('button').addEventListener('click', () => {
+        const k = th.dataset.field;
+        if (st.key === k) st.dir = -st.dir; else { st.key = k; st.dir = typeof rows[0]?.[k] === 'number' ? -1 : 1; }
+        window.ck.redraw();
+      }));
+    }
+    ths.forEach((th) => th.setAttribute('aria-sort', th.dataset.field === st.key ? (st.dir < 0 ? 'descending' : 'ascending') : 'none'));
+    const sorted = rows.slice().sort((a, b) => {
+      const x = a[st.key], y = b[st.key];
+      return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * st.dir;
+    });
+    const body = tbl.tBodies[0];
+    tbl._onRow = opts.onRow || null;
+    tbl.classList.toggle('ck-click', !!opts.onRow);
+    if (!tbl.dataset.rowWired) {
+      tbl.dataset.rowWired = '1';
+      const go = (ev) => {
+        const tr = ev.target.closest('tr[data-key]');
+        if (tr && tbl._onRow) tbl._onRow(tr.dataset.key, tr._row);
+      };
+      body.addEventListener('click', go);
+      body.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(ev); } });
+    }
+    body.replaceChildren(...sorted.map((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = opts.keyOf ? opts.keyOf(r) : String(r[opts.key]);
+      tr._row = r;
+      if (opts.onRow) tr.tabIndex = 0;
+      if (opts.selected != null && tr.dataset.key === String(opts.selected)) tr.classList.add('ck-sel');
+      for (const th of ths) {
+        const td = document.createElement('td');
+        td.className = th.className;
+        const f = th.dataset.field;
+        (opts.cell && opts.cell[f] ? opts.cell[f] : (td2, v) => { td2.textContent = typeof v === 'number' ? fmt2(v) : v; })(td, r[f], r);
+        tr.appendChild(td);
+      }
+      return tr;
+    }));
+  };
+  const money = (td, v) => {
+    td.textContent = signed(v);
+    if (v > 0) td.classList.add('ck-pos'); else if (v < 0) td.classList.add('ck-neg');
+  };
+
+  const tone = (el, v) => {
+    el.classList.toggle('ck-pos', v > 0);
+    el.classList.toggle('ck-neg', v < 0);
+  };
+  /* fill marked elements inside a scope from one row */
+  const fillMarks = (scope, source, row, where, format) => {
+    scope.querySelectorAll(`[data-source="${source}"][data-field]`).forEach((el) => {
+      if (el.tagName === 'SELECT') return;
+      el.classList.remove('dash-skeleton');
+      if (where) el.setAttribute('data-where', where); else el.removeAttribute('data-where');
+      const f = el.dataset.field;
+      if (!row) { el.textContent = '—'; tone(el, 0); return; }
+      const v = row[f];
+      el.textContent = format && format[f] ? format[f](v) : (typeof v === 'number' ? fmt0(v) : v);
+    });
+  };
+
+  return { fmt0, fmt2, signed, pct, shift, hhmm, dayName, tzName, tip, fail, cleanAxis, measure, table, money, tone, fillMarks, H, redraw: () => {} };
+})();
+
+/* ---------- controls ---------- */
+(() => {
+  const tzBtns = [...document.querySelectorAll('#tz-toggle button')];
+  tzBtns.forEach((b) => b.addEventListener('click', () => dash.setParams({ tz: b.dataset.tz })));
+
+  const tabs = [...document.querySelectorAll('.ck-tabs button')];
+  const pages = [...document.querySelectorAll('[data-page-body]')];
+  window.ck.page = 'overview';
+  const show = (name, link) => {
+    if (!pages.some((p) => p.id === name)) return;
+    window.ck.page = name;
+    tabs.forEach((t) => t.setAttribute('aria-selected', String(t.dataset.page === name)));
+    pages.forEach((p) => { p.hidden = p.id !== name; });
+    if (link) dash.setLink(name);
+    window.ck.redraw();
+  };
+  tabs.forEach((t) => t.addEventListener('click', () => show(t.dataset.page, true)));
+  window.ck.showPage = show;
+
+  window.ck.openPlayer = (id) => { dash.setParams({ player: id }); show('profile', true); window.scrollTo({ top: 0 }); };
+  window.ck.openAgent = (name) => { dash.setParams({ agent: name }); show('agents', true); window.scrollTo({ top: 0 }); };
+  document.getElementById('prof-select').addEventListener('change', (e) => dash.setParams({ player: e.target.value }));
+  document.getElementById('agent-select').addEventListener('change', (e) => dash.setParams({ agent: e.target.value }));
+  document.getElementById('prof-agent').addEventListener('click', (e) => {
+    const name = e.currentTarget.textContent;
+    if (name && name !== '—') window.ck.openAgent(name);
+  });
+  document.getElementById('member-search').addEventListener('input', () => window.ck.redraw());
+  document.getElementById('member-active').addEventListener('change', () => window.ck.redraw());
+})();
+
+/* ---------- drawing ---------- */
+(() => {
+  const ck = window.ck;
+  let linked = false;
+
+  const header = () => {
+    const k = dash.data('kpis');
+    const row = k.status === 'ok' ? k.data[0] : null;
+    document.querySelectorAll('[data-source="kpis"]').forEach((el) => {
+      const f = el.dataset.field;
+      if (!row) { el.textContent = '—'; return; }
+      el.classList.remove('dash-skeleton');
+      const v = row[f];
+      el.textContent = (f === 'ploShare' || f === 'top10Share') ? ck.pct(v) : ck.fmt0(v);
+    });
+    const tz = dash.params().tz || 'oslo';
+    document.querySelectorAll('#tz-toggle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tz === tz)));
+  };
+
+  const daily = () => {
+    const box = document.getElementById('chart-daily');
+    const d = dash.data('daily');
+    ck.fail(box, d);
+    if (d.status !== 'ok' || !box.clientWidth) return;
+    const days = [...new Set(d.data.map((r) => r.day))].sort();
+    const games = ['NLH', 'PLO5'];
+    const byDay = days.map((day) => {
+      const o = { day };
+      for (const g of games) { const r = d.data.find((x) => x.day === day && x.game === g); o[g] = r ? r.rake : 0; o[g + '_s'] = r ? r.sessions : 0; }
+      return o;
+    });
+    const W = box.clientWidth, Hh = 240;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${Hh}`);
+    const y = d3.scaleLinear([0, d3.max(byDay, (o) => o.NLH + o.PLO5) * 1.08], [Hh - 24, 8]).nice();
+    const yTicks = y.ticks(4);
+    const ml = ck.measure(svg, yTicks.map((t) => d3.format('~s')(t))) + 10;
+    const x = d3.scaleBand(days, [ml, W - 4]).padding(0.3);
+    svg.append('g').attr('transform', `translate(${ml},0)`).call(d3.axisLeft(y).tickValues(yTicks).tickFormat(d3.format('~s')).tickSize(-(W - ml - 4)))
+      .call(ck.cleanAxis).call((g) => g.select('.domain').remove());
+    svg.append('g').attr('transform', `translate(0,${Hh - 24})`)
+      .call(d3.axisBottom(x).tickSizeOuter(0).tickSize(0).tickPadding(8).tickFormat((s) => d3.utcFormat(W < 420 ? '%a' : '%a %-d')(new Date(s))))
+      .call(ck.cleanAxis);
+    const colors = { NLH: dash.colors[0], PLO5: dash.colors[1] };
+    const stack = d3.stack().keys(games)(byDay);
+    const tip = ck.tip(box);
+    const bw = Math.min(32, x.bandwidth());
+    const off = (x.bandwidth() - bw) / 2;
+    svg.append('g').selectAll('g').data(stack).join('g').attr('fill', (s) => colors[s.key])
+      .selectAll('rect').data((s) => s).join('rect')
+      .attr('x', (p) => x(p.data.day) + off).attr('width', bw)
+      .attr('y', (p) => y(p[1])).attr('height', (p) => Math.max(0, y(p[0]) - y(p[1]) - 1)).attr('rx', 3);
+    svg.append('g').selectAll('rect').data(byDay).join('rect')
+      .attr('x', (o) => x(o.day)).attr('width', x.bandwidth()).attr('y', 0).attr('height', Hh - 24).attr('fill', 'transparent')
+      .on('mousemove', (ev, o) => tip.show(ev, d3.utcFormat('%A %-d %b')(new Date(o.day)), [
+        { color: colors.NLH, label: `NLH · ${o.NLH_s} sessions`, value: ck.fmt0(o.NLH) },
+        { color: colors.PLO5, label: `PLO5 · ${o.PLO5_s} sessions`, value: ck.fmt0(o.PLO5) },
+        { label: 'Total', value: ck.fmt0(o.NLH + o.PLO5) },
+      ]))
+      .on('mouseleave', () => tip.hide());
+  };
+
+  const heat = () => {
+    const box = document.getElementById('chart-heat');
+    const d = dash.data('heat');
+    ck.fail(box, d);
+    if (d.status !== 'ok' || !box.clientWidth) return;
+    const tz = dash.params().tz || 'oslo';
+    const rows = d.data.filter((r) => r.tz === tz);
+    const s0 = d3.min(rows, (r) => r.slot), s1 = d3.max(rows, (r) => r.slot);
+    const slots = d3.range(s0, s1 + 1);
+    const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const W = box.clientWidth;
+    const svg = d3.select(box).append('svg').attr('width', '100%');
+    const ml = ck.measure(svg, wd) + 10;
+    const cw = (W - ml - 4) / slots.length;
+    const ch = Math.min(28, Math.max(18, cw));
+    const Hh = 7 * ch + 26;
+    svg.attr('viewBox', `0 0 ${W} ${Hh}`);
+    const max = d3.max(rows, (r) => r.tableHours);
+    const op = d3.scaleLinear([0, max], [0.08, 1]);
+    const tip = ck.tip(box);
+    const lookup = new Map(rows.map((r) => [r.weekday + '|' + r.slot, r]));
+    wd.forEach((n, i) => svg.append('text').attr('x', ml - 8).attr('y', i * ch + ch / 2 + 4).attr('text-anchor', 'end').text(n));
+    const cells = [];
+    for (let i = 0; i < 7; i++) for (const s of slots) cells.push({ weekday: i, slot: s, r: lookup.get(i + '|' + s) });
+    svg.append('g').selectAll('rect').data(cells).join('rect')
+      .attr('x', (c) => ml + (c.slot - s0) * cw + 1).attr('y', (c) => c.weekday * ch + 1)
+      .attr('width', Math.max(1, cw - 2)).attr('height', ch - 2).attr('rx', 3)
+      .attr('fill', (c) => (c.r ? dash.colors[0] : 'var(--cds-chart-grid)'))
+      .attr('fill-opacity', (c) => (c.r ? op(c.r.tableHours) : 0.5))
+      .on('mousemove', (ev, c) => {
+        const h = (c.slot + 6) % 24;
+        tip.show(ev, `${wd[c.weekday]} night · ${String(h).padStart(2, '0')}:00–${String((h + 1) % 24).padStart(2, '0')}:00`, [
+          { label: 'Tables open on average', value: c.r ? d3.format('.1f')(c.r.tableHours) : '0' },
+        ]);
+      })
+      .on('mouseleave', () => tip.hide());
+    const every = cw < 22 ? 3 : cw < 34 ? 2 : 1;
+    slots.forEach((s, i) => {
+      if (i % every) return;
+      svg.append('text').attr('x', ml + (s - s0) * cw + cw / 2).attr('y', 7 * ch + 16).attr('text-anchor', 'middle')
+        .text(String((s + 6) % 24).padStart(2, '0'));
+    });
+    let note = box.parentNode.querySelector('.ck-heat-tz');
+    if (!note) { note = document.createElement('p'); note.className = 'ck-note ck-heat-tz'; note.style.margin = '8px 0 0'; box.after(note); }
+    note.textContent = `Hours shown in ${ck.tzName(tz)}. Darkest cell: ${d3.format('.1f')(max)} tables.`;
+  };
+
+  const stakes = () => {
+    const d = dash.data('by_stake');
+    if (d.status !== 'ok') return;
+    const max = d3.max(d.data, (r) => r.rake);
+    ck.table('tbl-stakes', d.data, {
+      key: 'stake', sort: 'rake',
+      cell: {
+        rake: (td, v) => {
+          const w = document.createElement('div'); w.className = 'ck-bar';
+          const i = document.createElement('i'); i.style.width = Math.round((v / max) * 80) + 'px';
+          const s = document.createElement('span'); s.textContent = ck.fmt2(v);
+          w.append(i, s); td.appendChild(w);
+        },
+      },
+    });
+  };
+
+  const gantt = () => {
+    const box = document.getElementById('chart-gantt');
+    const d = dash.data('sessions');
+    ck.fail(box, d);
+    if (d.status !== 'ok' || !box.clientWidth) return;
+    const tz = dash.params().tz || 'oslo';
+    const H = ck.H;
+    const items = d.data.map((s) => {
+      const a = ck.shift(s.start, tz), b = ck.shift(s.end, tz);
+      const night = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate()) - (a.getUTCHours() < 6 ? 24 * H : 0));
+      return { s, a, b, night: +night, x0: (a - night) / H, x1: (b - night) / H };
+    });
+    const nights = [...new Set(items.map((i) => i.night))].sort((p, q) => p - q);
+    // lanes per night
+    const lanes = new Map();
+    for (const n of nights) {
+      const ends = [];
+      items.filter((i) => i.night === n).sort((p, q) => p.x0 - q.x0).forEach((i) => {
+        let l = ends.findIndex((e) => e <= i.x0);
+        if (l < 0) { l = ends.length; ends.push(0); }
+        ends[l] = i.x1; i.lane = l;
+      });
+      lanes.set(n, ends.length);
+    }
+    const W = box.clientWidth;
+    const svg = d3.select(box).append('svg').attr('width', '100%');
+    const labels = nights.map((n) => d3.utcFormat('%a %-d')(new Date(n)));
+    const ml = ck.measure(svg, labels) + 12;
+    const lh = 9, gap = 14;
+    let yy = 4; const rowY = new Map();
+    for (const n of nights) { rowY.set(n, yy); yy += lanes.get(n) * lh + gap; }
+    const Hh = yy + 18;
+    svg.attr('viewBox', `0 0 ${W} ${Hh}`);
+    const x = d3.scaleLinear([Math.floor(d3.min(items, (i) => i.x0)), Math.ceil(d3.max(items, (i) => i.x1))], [ml, W - 6]);
+    const ticks = d3.range(x.domain()[0], x.domain()[1] + 1, W < 500 ? 3 : 2);
+    svg.append('g').selectAll('line').data(ticks).join('line')
+      .attr('x1', (t) => x(t)).attr('x2', (t) => x(t)).attr('y1', 0).attr('y2', Hh - 18).attr('stroke', 'var(--cds-chart-grid)');
+    svg.append('g').selectAll('text').data(ticks).join('text')
+      .attr('x', (t) => x(t)).attr('y', Hh - 4).attr('text-anchor', 'middle').text((t) => String(t % 24).padStart(2, '0') + ':00');
+    nights.forEach((n, i) => svg.append('text').attr('x', ml - 10).attr('y', rowY.get(n) + (lanes.get(n) * lh) / 2 + 4)
+      .attr('text-anchor', 'end').text(labels[i]));
+    const colors = { NLH: dash.colors[0], PLO5: dash.colors[1] };
+    const tip = ck.tip(box);
+    svg.append('g').selectAll('rect').data(items).join('rect')
+      .attr('x', (i) => x(i.x0)).attr('width', (i) => Math.max(2, x(i.x1) - x(i.x0)))
+      .attr('y', (i) => rowY.get(i.night) + i.lane * lh).attr('height', lh - 2).attr('rx', 3)
+      .attr('fill', (i) => colors[i.s.game] || 'var(--cds-chart-muted)')
+      .on('mousemove', function (ev, i) {
+        d3.select(this).attr('stroke', 'var(--color-fg)');
+        tip.show(ev, `${i.s.table} · ${d3.utcFormat('%a')(i.a)} ${ck.hhmm(i.a)}–${ck.hhmm(i.b)}`, [
+          { color: colors[i.s.game], label: 'Length', value: `${Math.floor(i.s.minutes / 60)}h ${String(Math.round(i.s.minutes % 60)).padStart(2, '0')}m` },
+          { label: 'Players', value: String(i.s.players) },
+          { label: 'Hands', value: ck.fmt0(i.s.hands) },
+          { label: 'Rake', value: ck.fmt2(i.s.rake) },
+        ]);
+      })
+      .on('mouseleave', function () { d3.select(this).attr('stroke', null); tip.hide(); });
+    let note = box.parentNode.querySelector('.ck-gantt-tz');
+    if (!note) { note = document.createElement('p'); note.className = 'ck-note ck-gantt-tz'; note.style.margin = '8px 0 0'; box.after(note); }
+    note.textContent = `Times in ${ck.tzName(tz)}. Each row is one night, from 06:00 to 06:00.`;
+  };
+
+  const sessionsTbl = () => {
+    const d = dash.data('sessions');
+    if (d.status !== 'ok') return;
+    const tz = dash.params().tz || 'oslo';
+    ck.table('tbl-sessions', d.data, {
+      key: 'session', sort: 'rake',
+      cell: {
+        session: (td, v) => { td.textContent = String(v); },
+        start: (td, v) => { const a = ck.shift(v, tz); td.textContent = d3.utcFormat('%a %-d %b %H:%M')(a); },
+        table: (td, v, r) => {
+          td.className = 'who';
+          const p = document.createElement('span'); p.className = 'ck-pill'; p.textContent = r.game;
+          td.append(document.createTextNode(v + ' '), p);
+        },
+      },
+    });
+  };
+
+  const hbars = (boxId, rows, valueOf, labelOf, opts) => {
+    const box = document.getElementById(boxId);
+    const d = dash.data('members');
+    ck.fail(box, d);
+    if (d.status !== 'ok' || !box.clientWidth) return;
+    const W = box.clientWidth;
+    const svg = d3.select(box).append('svg').attr('width', '100%');
+    const names = rows.map(labelOf);
+    const ml = Math.min(W * 0.4, ck.measure(svg, names) + 12);
+    const vals = rows.map(valueOf);
+    const valW = ck.measure(svg, vals.map((v) => (opts.signed ? ck.signed(Math.round(v)) : ck.fmt0(v)))) + 8;
+    const bh = 22;
+    const Hh = rows.length * bh + 4;
+    svg.attr('viewBox', `0 0 ${W} ${Hh}`);
+    const lo = Math.min(0, d3.min(vals)), hi = Math.max(0, d3.max(vals));
+    const x = d3.scaleLinear([lo, hi], [ml + (lo < 0 ? valW : 0), W - valW]);
+    const tip = ck.tip(box);
+    svg.append('line').attr('x1', x(0)).attr('x2', x(0)).attr('y1', 0).attr('y2', Hh).attr('stroke', 'var(--cds-chart-axis)');
+    const g = svg.append('g').selectAll('g').data(rows).join('g').attr('transform', (r, i) => `translate(0,${i * bh})`);
+    g.append('text').attr('x', ml - 10).attr('y', bh / 2 + 4).attr('text-anchor', 'end')
+      .text((r) => { const n = labelOf(r); return n.length > 18 ? n.slice(0, 17) + '…' : n; });
+    g.append('rect')
+      .attr('x', (r) => Math.min(x(0), x(valueOf(r)))).attr('width', (r) => Math.max(1, Math.abs(x(valueOf(r)) - x(0))))
+      .attr('y', 4).attr('height', bh - 8).attr('rx', 4)
+      .attr('fill', (r) => opts.color(valueOf(r)));
+    g.append('text').attr('y', bh / 2 + 4)
+      .attr('x', (r) => (valueOf(r) < 0 ? x(valueOf(r)) - 6 : x(valueOf(r)) + 6))
+      .attr('text-anchor', (r) => (valueOf(r) < 0 ? 'end' : 'start'))
+      .style('fill', 'var(--color-fg)')
+      .text((r) => (opts.signed ? ck.signed(Math.round(valueOf(r))) : ck.fmt0(valueOf(r))));
+    g.append('rect').attr('x', 0).attr('width', W).attr('height', bh).attr('fill', 'transparent')
+      .style('cursor', 'pointer')
+      .on('mousemove', (ev, r) => tip.show(ev, `${r.player} (${r.id})`, opts.lines(r)))
+      .on('mouseleave', () => tip.hide())
+      .on('click', (ev, r) => { tip.hide(); ck.openPlayer(r.id); });
+  };
+
+  const players = () => {
+    const d = dash.data('members');
+    if (d.status === 'ok') {
+      const top = d.data.slice().sort((a, b) => b.fee - a.fee).slice(0, 15);
+      const lines = (r) => [
+        { label: 'Rake & fees', value: ck.fmt2(r.fee) }, { label: 'Hands', value: ck.fmt0(r.hands) },
+        { label: 'Net', value: ck.signed(r.pnl) }, { label: 'Agent', value: r.agent },
+      ];
+      hbars('chart-toprake', top, (r) => r.fee, (r) => r.player, { color: () => dash.colors[0], lines });
+      const by = d.data.slice().sort((a, b) => b.pnl - a.pnl);
+      const pnl = [...by.slice(0, 8), ...by.slice(-8)];
+      hbars('chart-pnl', pnl, (r) => r.pnl, (r) => r.player, {
+        signed: true, color: (v) => (v >= 0 ? 'var(--cds-chart-muted)' : 'var(--cds-chart-status-critical)'),
+        lines: (r) => [{ label: 'NLH', value: ck.signed(r.pnlNLH) }, { label: 'PLO5', value: ck.signed(r.pnlPLO5) },
+          { label: 'Tournament', value: ck.signed(r.pnlMTT) }, { label: 'Rake paid', value: ck.fmt2(r.fee) }],
+      });
+      const q = document.getElementById('member-search').value.trim().toLowerCase();
+      const onlyActive = document.getElementById('member-active').checked;
+      const rows = d.data.filter((r) => (!onlyActive || r.hands > 0) && (!q || r.player.toLowerCase().includes(q) || r.id.includes(q)));
+      ck.table('tbl-members', rows, {
+        key: 'id', sort: 'fee', onRow: (id) => ck.openPlayer(id),
+        cell: {
+          player: (td, v) => { td.className = 'who'; td.textContent = v; },
+          pnl: ck.money,
+          games: (td, v) => { td.className = 'num ck-hide-sm'; td.textContent = String(v); },
+        },
+      });
+    } else {
+      ['chart-toprake', 'chart-pnl'].forEach((id) => ck.fail(document.getElementById(id), d));
+    }
+  };
+
+  /* ---------- player profile ---------- */
+  const profile = () => {
+    const page = document.getElementById('profile');
+    const mem = dash.data('members');
+    const sel = document.getElementById('prof-select');
+    if (mem.status !== 'ok') return;
+    if (!sel.options.length) {
+      const byName = (a, b) => a.player.localeCompare(b.player, 'nb');
+      const og1 = document.createElement('optgroup'); og1.label = 'Played this week';
+      const og2 = document.createElement('optgroup'); og2.label = 'Did not play';
+      mem.data.filter((m) => m.hands > 0).sort(byName).forEach((m) => og1.appendChild(new Option(`${m.player} · ${m.id}`, m.id)));
+      mem.data.filter((m) => !(m.hands > 0)).sort(byName).forEach((m) => og2.appendChild(new Option(`${m.player} · ${m.id}`, m.id)));
+      sel.append(og1, og2);
+    }
+    let id = dash.params().player;
+    if (!id || !mem.data.some((m) => m.id === id)) id = mem.data.slice().sort((a, b) => b.fee - a.fee)[0].id;
+    sel.value = id;
+    const where = 'id=' + encodeURIComponent(id);
+    const m = mem.data.find((x) => x.id === id);
+    ck.fillMarks(page, 'members', m, where, { pnl: ck.signed, chips: ck.fmt2, fee: ck.fmt2 });
+    page.querySelectorAll('[data-source="members"][data-field="pnl"]').forEach((el) => ck.tone(el, m.pnl));
+
+    const st = dash.data('player_stats');
+    const srow = st.status === 'ok' ? st.data.find((r) => r.id === id) : null;
+    ck.fillMarks(page, 'player_stats', srow || null, srow ? where : null, {
+      winShare: ck.pct, biggestWin: ck.signed, biggestLoss: ck.signed, buyin: ck.fmt2, rakePer100: ck.fmt2,
+    });
+    if (!srow && st.status === 'ok') page.querySelectorAll('[data-source="player_stats"][data-field="sessions"]').forEach((el) => { el.textContent = '0'; });
+    const mr = dash.data('mtt_results');
+    const mrow = mr.status === 'ok' ? mr.data.find((r) => r.id === id) : null;
+    ck.fillMarks(page, 'mtt_results', mrow || null, mrow ? where : null, { prize: ck.fmt2, net: ck.signed });
+    page.querySelectorAll('[data-source="mtt_results"]').forEach((el) => {
+      if (!mrow && mr.status === 'ok') el.textContent = 'Did not play';
+      ck.tone(el, el.dataset.field === 'net' && mrow ? mrow.net : 0);
+    });
+    page.querySelectorAll('[data-source="player_stats"][data-field="biggestWin"],[data-source="player_stats"][data-field="biggestLoss"]')
+      .forEach((el) => ck.tone(el, srow ? srow[el.dataset.field] : 0));
+
+    // result by game
+    const gbox = document.getElementById('chart-prof-game');
+    ck.fail(gbox, mem);
+    if (gbox.clientWidth) {
+      const games = [{ k: 'pnlNLH', n: 'NLH' }, { k: 'pnlPLO5', n: 'PLO5' }, { k: 'pnlMTT', n: 'Tournament' }];
+      const W = gbox.clientWidth, bh = 30, Hh = games.length * bh + 4;
+      const svg = d3.select(gbox).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${Hh}`);
+      const ml = ck.measure(svg, games.map((g) => g.n)) + 14;
+      const vw = ck.measure(svg, games.map((g) => ck.signed(Math.round(m[g.k])))) + 10;
+      const ext = Math.max(1, d3.max(games, (g) => Math.abs(m[g.k])));
+      const anyNeg = games.some((g) => m[g.k] < 0), anyPos = games.some((g) => m[g.k] > 0);
+      const x = d3.scaleLinear([anyNeg ? -ext : 0, anyPos || !anyNeg ? ext : 0], [ml + (anyNeg ? vw : 0), W - (anyPos || !anyNeg ? vw : 4)]);
+      svg.append('line').attr('x1', x(0)).attr('x2', x(0)).attr('y1', 0).attr('y2', Hh).attr('stroke', 'var(--cds-chart-axis)');
+      const g = svg.append('g').selectAll('g').data(games).join('g').attr('transform', (d, i) => `translate(0,${i * bh})`);
+      g.append('text').attr('x', ml - 10).attr('y', bh / 2 + 4).attr('text-anchor', 'end').text((d) => d.n);
+      g.append('rect').attr('x', (d) => Math.min(x(0), x(m[d.k]))).attr('width', (d) => Math.max(m[d.k] ? 2 : 0, Math.abs(x(m[d.k]) - x(0))))
+        .attr('y', 7).attr('height', bh - 14).attr('rx', 4)
+        .attr('fill', (d) => (m[d.k] < 0 ? 'var(--cds-chart-status-critical)' : dash.colors[0]));
+      g.append('text').attr('y', bh / 2 + 4).attr('x', (d) => (m[d.k] < 0 ? x(m[d.k]) - 6 : x(m[d.k]) + 6))
+        .attr('text-anchor', (d) => (m[d.k] < 0 ? 'end' : 'start')).style('fill', 'var(--color-fg)')
+        .text((d) => ck.signed(Math.round(m[d.k])));
+    }
+
+    // running result + session table
+    const ps = dash.data('player_sessions');
+    const rbox = document.getElementById('chart-prof-run');
+    ck.fail(rbox, ps);
+    if (ps.status !== 'ok') return;
+    const tz = dash.params().tz || 'oslo';
+    const mine = ps.data.filter((r) => r.id === id).sort((a, b) => (a.start < b.start ? -1 : 1));
+    document.getElementById('prof-none').hidden = mine.length > 0;
+    document.getElementById('tbl-prof').hidden = mine.length === 0;
+    ck.table('tbl-prof', mine, {
+      key: 'session', sort: 'session', keyOf: (r) => encodeURIComponent(String(r.session)) + ',' + encodeURIComponent(r.id),
+      cell: {
+        session: (td, v) => { td.textContent = String(v); },
+        start: (td, v) => { td.textContent = d3.utcFormat('%a %-d %b %H:%M')(ck.shift(v, tz)); },
+        hands: (td, v) => { td.textContent = String(v); },
+        pnl: ck.money,
+      },
+    });
+    let acc = 0;
+    const pts = mine.map((r, i) => { acc += r.pnl; return { r, i, t: ck.shift(r.start, tz), run: Math.round(acc * 100) / 100 }; });
+    let empty = rbox.querySelector('.ck-empty');
+    if (!pts.length) {
+      if (!empty) { empty = document.createElement('p'); empty.className = 'ck-empty'; empty.textContent = 'No ring sessions this week.'; rbox.appendChild(empty); }
+      return;
+    }
+    if (empty) empty.remove();
+    if (!rbox.clientWidth) return;
+    const W = rbox.clientWidth, Hh = 240;
+    const svg = d3.select(rbox).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${Hh}`);
+    const lo = Math.min(0, d3.min(pts, (p) => p.run)), hi = Math.max(0, d3.max(pts, (p) => p.run));
+    const y = d3.scaleLinear([lo, hi === lo ? lo + 1 : hi], [Hh - 26, 10]).nice();
+    const yt = y.ticks(4);
+    const ml = ck.measure(svg, yt.map((t) => d3.format('~s')(t))) + 10;
+    const x = d3.scalePoint(pts.map((p) => p.i), [ml + 8, W - 10]).padding(pts.length === 1 ? 0.5 : 0);
+    svg.append('g').attr('transform', `translate(${ml},0)`).call(d3.axisLeft(y).tickValues(yt).tickFormat(d3.format('~s')).tickSize(-(W - ml - 4)))
+      .call(ck.cleanAxis).call((gg) => gg.select('.domain').remove());
+    svg.append('line').attr('x1', ml).attr('x2', W - 4).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--cds-chart-reference)');
+    const every = Math.max(1, Math.ceil(pts.length / Math.floor((W - ml) / 70)));
+    pts.forEach((p, k) => {
+      if (k % every) return;
+      svg.append('text').attr('x', x(p.i)).attr('y', Hh - 8).attr('text-anchor', 'middle').text(d3.utcFormat('%a %H:%M')(p.t));
+    });
+    const col = acc >= 0 ? dash.colors[0] : 'var(--cds-chart-status-critical)';
+    svg.append('path').datum(pts).attr('fill', 'none').attr('stroke', col).attr('stroke-width', 2)
+      .attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
+      .attr('d', d3.line((p) => x(p.i), (p) => y(p.run)));
+    const dots = svg.append('g').selectAll('circle').data(pts).join('circle')
+      .attr('cx', (p) => x(p.i)).attr('cy', (p) => y(p.run)).attr('r', 3).attr('fill', col);
+    const last = pts[pts.length - 1];
+    svg.append('circle').attr('cx', x(last.i)).attr('cy', y(last.run)).attr('r', 5).attr('fill', col);
+    const tip = ck.tip(rbox);
+    const step = pts.length > 1 ? x(pts[1].i) - x(pts[0].i) : W;
+    svg.append('g').selectAll('rect').data(pts).join('rect')
+      .attr('x', (p) => x(p.i) - step / 2).attr('width', step).attr('y', 0).attr('height', Hh - 20).attr('fill', 'transparent')
+      .on('mousemove', (ev, p) => {
+        dots.attr('r', (q) => (q === p ? 5 : 3));
+        tip.show(ev, `#${p.r.session} · ${p.r.stake} · ${d3.utcFormat('%a %-d %b %H:%M')(p.t)}`, [
+          { label: 'Session net', value: ck.signed(p.r.pnl) }, { label: 'Running total', value: ck.signed(p.run) },
+          { label: 'Hands', value: String(p.r.hands) }, { label: 'Rake', value: ck.fmt2(p.r.rake) },
+        ]);
+      })
+      .on('mouseleave', () => { dots.attr('r', 3); tip.hide(); });
+  };
+
+  /* ---------- agents ---------- */
+  const agentsPage = () => {
+    const page = document.getElementById('agents');
+    const a = dash.data('agents');
+    const sel = document.getElementById('agent-select');
+    if (a.status !== 'ok') return;
+    if (!sel.options.length) {
+      a.data.forEach((r) => sel.appendChild(new Option(r.agent === 'Direct' ? 'Direct (no agent)' : `${r.agent} · ${r.role}`, r.agent)));
+    }
+    let ag = dash.params().agent;
+    if (!ag || !a.data.some((r) => r.agent === ag)) ag = a.data[0].agent;
+    sel.value = ag;
+    const row = a.data.find((r) => r.agent === ag);
+    const where = 'agent=' + encodeURIComponent(ag);
+    ck.fillMarks(page.querySelector('.ck-who'), 'agents', row, where);
+    page.querySelectorAll('.ck-kpis [data-source="agents"]').forEach((el) => {
+      el.classList.remove('dash-skeleton'); el.setAttribute('data-where', where);
+      const f = el.dataset.field, v = row[f];
+      el.textContent = f === 'pnl' ? ck.signed(v) : f === 'fee' || f === 'chips' ? ck.fmt2(v) : ck.fmt0(v);
+      if (f === 'pnl') ck.tone(el, v);
+    });
+    ck.table('tbl-agents', a.data, {
+      key: 'agent', sort: 'fee', selected: ag, onRow: (k) => dash.setParams({ agent: k }),
+      cell: { pnl: ck.money, players: (td, v) => { td.textContent = String(v); }, active: (td, v) => { td.textContent = String(v); } },
+    });
+
+    const mem = dash.data('members');
+    if (mem.status === 'ok') {
+      const names = new Set(a.data.map((r) => r.agent));
+      const owners = (m) => {
+        const o = new Set();
+        if (m.agent !== 'Direct') o.add(m.agent);
+        if (m.superAgent) o.add(m.superAgent);
+        if (names.has(m.player)) o.add(m.player);
+        if (!o.size) o.add('Direct');
+        return o;
+      };
+      const down = mem.data.filter((m) => owners(m).has(ag));
+      ck.table('tbl-down', down, {
+        key: 'id', sort: 'fee', onRow: (id) => ck.openPlayer(id),
+        cell: { player: (td, v, r) => { td.className = 'who'; td.textContent = v + (r.player === ag ? ' (agent)' : ''); }, pnl: ck.money,
+          hands: (td, v) => { td.textContent = String(v); } },
+      });
+    }
+
+    const box = document.getElementById('chart-agent-daily');
+    const dd = dash.data('agent_daily');
+    ck.fail(box, dd);
+    if (dd.status !== 'ok' || !box.clientWidth) return;
+    const days = [...new Set(dash.data('sessions').status === 'ok' ? dash.data('sessions').data.map((s) => s.start.slice(0, 10)) : dd.data.map((r) => r.day))].sort();
+    const rows = days.map((day) => dd.data.find((r) => r.agent === ag && r.day === day) || { day, rake: 0, pnl: 0, hands: 0, seats: 0 });
+    let empty = box.querySelector('.ck-empty');
+    if (!rows.some((r) => r.rake > 0)) {
+      if (!empty) { empty = document.createElement('p'); empty.className = 'ck-empty'; empty.textContent = 'This downline played no ring games this week.'; box.appendChild(empty); }
+      return;
+    }
+    if (empty) empty.remove();
+    const W = box.clientWidth, Hh = 240;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${Hh}`);
+    const y = d3.scaleLinear([0, d3.max(rows, (r) => r.rake) * 1.1], [Hh - 24, 8]).nice();
+    const yt = y.ticks(4);
+    const ml = ck.measure(svg, yt.map((t) => d3.format('~s')(t))) + 10;
+    const x = d3.scaleBand(days, [ml, W - 4]).padding(0.3);
+    svg.append('g').attr('transform', `translate(${ml},0)`).call(d3.axisLeft(y).tickValues(yt).tickFormat(d3.format('~s')).tickSize(-(W - ml - 4)))
+      .call(ck.cleanAxis).call((gg) => gg.select('.domain').remove());
+    svg.append('g').attr('transform', `translate(0,${Hh - 24})`)
+      .call(d3.axisBottom(x).tickSizeOuter(0).tickSize(0).tickPadding(8).tickFormat((s) => d3.utcFormat(W < 420 ? '%a' : '%a %-d')(new Date(s))))
+      .call(ck.cleanAxis);
+    const bw = Math.min(32, x.bandwidth()), off = (x.bandwidth() - bw) / 2;
+    const tip = ck.tip(box);
+    svg.append('g').selectAll('rect').data(rows).join('rect')
+      .attr('x', (r) => x(r.day) + off).attr('width', bw).attr('y', (r) => y(r.rake)).attr('height', (r) => Math.max(0, y(0) - y(r.rake)))
+      .attr('rx', 4).attr('fill', dash.colors[0]);
+    svg.append('g').selectAll('rect').data(rows).join('rect')
+      .attr('x', (r) => x(r.day)).attr('width', x.bandwidth()).attr('y', 0).attr('height', Hh - 24).attr('fill', 'transparent')
+      .on('mousemove', (ev, r) => tip.show(ev, d3.utcFormat('%A %-d %b')(new Date(r.day)), [
+        { label: 'Rake', value: ck.fmt2(r.rake) }, { label: "Players' net", value: ck.signed(r.pnl) },
+        { label: 'Hands', value: ck.fmt0(r.hands) }, { label: 'Seats taken', value: String(r.seats) },
+      ]))
+      .on('mouseleave', () => tip.hide());
+  };
+
+  const tournament = () => {
+    const d = dash.data('mtt');
+    const row = d.status === 'ok' ? d.data[0] : null;
+    document.querySelectorAll('#tournament [data-source="mtt"]').forEach((el) => {
+      if (!row) { el.textContent = '—'; return; }
+      el.classList.remove('dash-skeleton');
+      const v = row[el.dataset.field];
+      el.textContent = typeof v === 'number' ? ck.fmt0(v) : v;
+    });
+    const when = document.getElementById('mtt-when');
+    if (row) {
+      const tz = dash.params().tz || 'oslo';
+      const a = ck.shift(row.start, tz), b = ck.shift(row.end, tz);
+      when.textContent = `${d3.utcFormat('%a %-d %b, %H:%M')(a)}–${ck.hhmm(b)} ${tz === 'oslo' ? 'Oslo' : 'UTC−7'}`;
+    }
+    const r = dash.data('mtt_results');
+    if (r.status === 'ok') {
+      ck.table('tbl-mtt', r.data, {
+        key: 'id', sort: 'prize',
+        cell: { player: (td, v) => { td.className = 'who'; td.textContent = v; }, net: ck.money,
+          hands: (td, v) => { td.className = 'num ck-hide-sm'; td.textContent = String(v); } },
+      });
+    }
+  };
+
+  const draw = () => {
+    header();
+    const p = ck.page;
+    if (p === 'overview') { daily(); heat(); stakes(); }
+    if (p === 'tables') { gantt(); sessionsTbl(); }
+    if (p === 'players') players();
+    if (p === 'profile') profile();
+    if (p === 'agents') agentsPage();
+    if (p === 'tournament') tournament();
+    if (!linked && dash.data('sessions').status === 'ok') {
+      linked = true;
+      const named = location.hash.slice(1);
+      if (named && named !== ck.page) ck.showPage(named, false);
+    }
+  };
+  ck.redraw = draw;
+  dash.onData(draw);
+})();
+</script>
+
+</div>
+</body>
+</html>

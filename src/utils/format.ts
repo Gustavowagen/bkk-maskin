@@ -25,3 +25,13 @@ export const formatFullDate = (isoDate: string): string =>
 
 export const formatDateTime = (isoTimestamp: string): string =>
   new Date(isoTimestamp).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+/** Up to two decimals, e.g. "14,813.06" */
+export const formatAmount = (value: number): string => value.toLocaleString('en-US', { maximumFractionDigits: 2 })
+
+/** Up to two decimals with a sign, e.g. "+4,620.93" or "−4,600" */
+export const signedAmount = (value: number): string =>
+  `${value > 0 ? '+' : value < 0 ? '−' : ''}${formatAmount(Math.abs(value))}`
+
+/** A ratio as a percentage, e.g. 0.685 → "68.5%" */
+export const formatShare = (ratio: number): string => `${(Number.isFinite(ratio) ? ratio * 100 : 0).toFixed(1)}%`
