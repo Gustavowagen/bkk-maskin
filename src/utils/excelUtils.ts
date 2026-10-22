@@ -58,13 +58,13 @@ export const extractExcelFromZip = async (zipFile: File): Promise<File> => {
 };
 
 // Compare headers ignoring case and whitespace, so "Rake&Fee" matches "Rake & Fee"
-const normalizeHeader = (value: unknown): string => String(value ?? '').replace(/\s+/g, '').toLowerCase();
+export const normalizeHeader = (value: unknown): string => String(value ?? '').replace(/\s+/g, '').toLowerCase();
 
 /**
  * Parse a numeric cell. Handles real numbers as well as text with spaces as thousands
  * separators, "," as decimal separator or a unicode minus sign (e.g. "1 271,98").
  */
-const parseNumber = (value: unknown): number => {
+export const parseNumber = (value: unknown): number => {
   if (typeof value === 'number') return value;
   const text = String(value ?? '')
     .replace(/\s/g, '') // also matches non-breaking and narrow no-break spaces
@@ -76,6 +76,7 @@ const parseNumber = (value: unknown): number => {
 
 export interface MemberStatistic {
   nickname: string;
+  memberId: string; // "Member" -> "ID" (e.g. "1234-5678"), '' if the column is missing
   rake: number;
   profitLoss: number; // Total player P&L
   agent: string; // Agent nickname, '' if the member has no agent
@@ -83,6 +84,8 @@ export interface MemberStatistic {
   role: string; // "Member" -> "Role" (Player, Agent, Manager, ...), '' if the column is missing
   bbjContribution: number; // "Bad Beat Jackpot" -> "Contribution Fee", 0 if the column is missing
   bbjPayout: number; // "Bad Beat Jackpot" -> "Payouts", 0 if the column is missing
+  games: number; // "Played Games" -> "Total", 0 if the column is missing
+  gamePnl: Record<string, number>; // P&L per game, see readGamePnl (only games that are not 0)
 }
 
 interface HeaderPosition {
@@ -93,7 +96,7 @@ interface HeaderPosition {
 /**
  * Wraps a sheet so columns can be located by their header names instead of fixed column letters.
  */
-const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => {
+export const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => {
   const sheetName = workbook.SheetNames.find(name => normalizeHeader(name) === normalizeHeader(targetSheetName));
   if (!sheetName) {
     throw new Error(`Sheet "${targetSheetName}" not found in the uploaded file.`);
@@ -167,16 +170,51 @@ const createSheetReader = (workbook: XLSX.WorkBook, targetSheetName: string) => 
     return result;
   };
 
-  return { cellAt, findHeader, findSubHeader, dataRows };
+  return { cellAt, findHeader, findSubHeader, dataRows, lastCol: range.e.c };
 };
 
 // Look up an optional column, returning undefined instead of throwing when it is missing
-const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined => {
+export const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined => {
   try {
     return find();
   } catch {
     return undefined;
   }
+};
+
+type SheetReader = ReturnType<typeof createSheetReader>;
+
+/**
+ * The columns of the "Player P&L" group, keyed by the game they are summed into: ring games by
+ * their game type ("NLH", "PLO5", ...), MTT as "Tournament" and the other formats by their name
+ * ("AoF", "SNG", "Spin&Gold"). The group's own "Total" column is skipped.
+ */
+const findGamePnlColumns = (sheet: SheetReader): { col: number; game: string }[] => {
+  const group = tryFindHeader(() => sheet.findHeader('Player P&L'));
+  if (!group) return [];
+  let endCol = group.col;
+  while (endCol + 1 <= sheet.lastCol && normalizeHeader(sheet.cellAt(group.row, endCol + 1)) === '') endCol++;
+
+  const columns: { col: number; game: string }[] = [];
+  let format = '';
+  for (let c = group.col; c <= endCol; c++) {
+    const formatCell = String(sheet.cellAt(group.row + 1, c) ?? '').trim();
+    if (formatCell) format = formatCell;
+    const gameType = String(sheet.cellAt(group.row + 2, c) ?? '').trim();
+    if (!format || normalizeHeader(format) === 'total') continue;
+    const game = normalizeHeader(format) === 'ringgame' ? gameType : normalizeHeader(format) === 'mtt' ? 'Tournament' : format;
+    if (game) columns.push({ col: c, game });
+  }
+  return columns;
+};
+
+const readGamePnl = (sheet: SheetReader, columns: { col: number; game: string }[], r: number): Record<string, number> => {
+  const pnl: Record<string, number> = {};
+  columns.forEach(({ col, game }) => {
+    const value = parseNumber(sheet.cellAt(r, col));
+    if (value !== 0) pnl[game] = round2((pnl[game] ?? 0) + value);
+  });
+  return pnl;
 };
 
 /**
@@ -186,6 +224,7 @@ const tryFindHeader = (find: () => HeaderPosition): HeaderPosition | undefined =
  * - Locates the "Rake&Fee" header and the "Total" sub-header underneath it
  * - Locates the "Player P&L" → "Total", "Agent" → "Nickname", "Played Hands" → "Total",
  *   "Member" → "Role" and "Bad Beat Jackpot" → "Contribution Fee" / "Payouts" columns (optional, 0 / '' if missing)
+ * - Also reads "Member" → "ID", "Played Games" → "Total" and the P&L per game (for the statistics)
  * - Reads every row below that until the "TOTAL" row. Members with 0 total rake are included;
  *   use isActiveMember to keep only the players that played in the period.
  */
@@ -199,6 +238,9 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
   const roleHeader = tryFindHeader(() => sheet.findSubHeader('Member', 'Role'));
   const bbjContributionHeader = tryFindHeader(() => sheet.findSubHeader('Bad Beat Jackpot', 'Contribution Fee'));
   const bbjPayoutHeader = tryFindHeader(() => sheet.findSubHeader('Bad Beat Jackpot', 'Payouts'));
+  const memberIdHeader = tryFindHeader(() => sheet.findSubHeader('Member', 'ID'));
+  const gamesHeader = tryFindHeader(() => sheet.findSubHeader('Played Games', 'Total'));
+  const gamePnlColumns = findGamePnlColumns(sheet);
 
   const players: MemberStatistic[] = [];
   const seen = new Set<string>();
@@ -214,11 +256,14 @@ export const extractMemberStatistics = (workbook: XLSX.WorkBook): MemberStatisti
     const role = roleHeader ? String(sheet.cellAt(r, roleHeader.col) ?? '').trim() : '';
     const bbjContribution = bbjContributionHeader ? parseNumber(sheet.cellAt(r, bbjContributionHeader.col)) : 0;
     const bbjPayout = bbjPayoutHeader ? parseNumber(sheet.cellAt(r, bbjPayoutHeader.col)) : 0;
+    const memberId = memberIdHeader ? String(sheet.cellAt(r, memberIdHeader.col) ?? '').trim() : '';
+    const games = gamesHeader ? parseNumber(sheet.cellAt(r, gamesHeader.col)) : 0;
+    const gamePnl = readGamePnl(sheet, gamePnlColumns, r);
 
     const key = nickname.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
-      players.push({ nickname, rake, profitLoss, agent, hands, role, bbjContribution, bbjPayout });
+      players.push({ nickname, memberId, rake, profitLoss, agent, hands, role, bbjContribution, bbjPayout, games, gamePnl });
     }
   });
 
@@ -303,6 +348,11 @@ export interface PlayerStatsRecord {
   agentShare: number; // For players in an agent table: the part of the agent's rake share that comes from their rake
   profitLoss: number; // "Player P&L" -> "Total" from "Member Statistics"
   hands: number;
+  memberId: string; // "Member" -> "ID" from "Member Statistics", '' if unknown
+  role: string; // "Member" -> "Role" from "Member Statistics", '' if unknown
+  games: number;
+  chips: number; // Chips in "Club Member Balance" at export, 0 if the player is not there
+  gamePnl: Record<string, number>; // P&L per game from "Member Statistics"
 }
 
 /** The totals of a filtered document, matching the stats table in the generated sheet */
@@ -324,7 +374,7 @@ export interface FilterResult {
 
 const BALANCE_SHEET_NAME = 'Club Member Balance';
 
-interface BalanceRow {
+export interface BalanceRow {
   nickname: string;
   chips: number;
 }
@@ -334,7 +384,7 @@ interface BalanceRow {
  * - Nickname: the "Nickname" sub-header under the "Member" header
  * - Chips: the "Chips" header
  */
-const getBalanceRows = (workbook: XLSX.WorkBook): BalanceRow[] => {
+export const getBalanceRows = (workbook: XLSX.WorkBook): BalanceRow[] => {
   const sheet = createSheetReader(workbook, BALANCE_SHEET_NAME);
   const nicknameHeader = sheet.findSubHeader('Member', 'Nickname');
   const chipsHeader = sheet.findHeader('Chips');
@@ -440,6 +490,15 @@ export const filterWorkbookByNicknames = (
   const playerRecords: PlayerStatsRecord[] = [];
 
   const balanceRows = getBalanceRows(workbook);
+  const chipsByNickname = new Map(balanceRows.map(row => [row.nickname.toLowerCase(), row.chips]));
+  // The member's ID, role, games, chips and P&L per game, saved with his statistics
+  const memberFields = (stat: MemberStatistic | undefined, displayName: string) => ({
+    memberId: stat?.memberId ?? '',
+    role: stat?.role ?? '',
+    games: stat?.games ?? 0,
+    chips: chipsByNickname.get((stat?.nickname ?? displayName).toLowerCase()) ?? chipsByNickname.get(displayName.toLowerCase()) ?? 0,
+    gamePnl: stat?.gamePnl ?? {},
+  });
 
   // If no nicknames provided, return empty workbook
   if (nicknames.length === 0) {
@@ -511,6 +570,7 @@ export const filterWorkbookByNicknames = (
       agentShare: round2(agentShare),
       profitLoss: stat?.profitLoss ?? 0,
       hands: stat?.hands ?? 0,
+      ...memberFields(stat, displayName),
     });
     return true;
   };
@@ -554,6 +614,7 @@ export const filterWorkbookByNicknames = (
       agentShare: 0,
       profitLoss: stat?.profitLoss ?? 0,
       hands: stat?.hands ?? 0,
+      ...memberFields(stat, displayName),
     });
 
     if (matchingNickname.owner) {

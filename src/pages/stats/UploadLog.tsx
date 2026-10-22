@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatChips, formatDateTime, formatFullDate, profitClass, signed } from '../../utils/format'
+import { formatChips, formatDateTime, formatFullDate } from '../../utils/format'
 import type { UploadLogRow } from '../../utils/statsApi'
 
 interface UploadLogProps {
@@ -29,21 +29,19 @@ function UploadLog({ uploads, selectedId, onSelect, onDelete }: UploadLogProps) 
   }
 
   return (
-    <section className="stats-card">
-      <header className="stats-card-header">
-        <h3>Upload log</h3>
-        <span className="stats-card-subtitle">Click an upload to see the stats for its period</span>
-      </header>
-      <div className="stats-table-wrapper">
-        <table className="stats-table">
+    <section className="ck-card">
+      <h3>Upload log</h3>
+      <p className="ck-note">Click an upload to see the stats for its period only, click it again to go back to the range.</p>
+      <div className="ck-tbl-wrap">
+        <table className="ck-tbl ck-click">
           <thead>
             <tr>
               <th>File</th>
               <th>Period</th>
               <th>Uploaded</th>
-              <th className="numeric">Players</th>
-              <th className="numeric">Rake</th>
-              <th className="numeric">Club net</th>
+              <th className="num">Players</th>
+              <th className="num">Brutto rake</th>
+              <th className="num">Netto rake</th>
               <th aria-label="Delete" />
             </tr>
           </thead>
@@ -51,7 +49,7 @@ function UploadLog({ uploads, selectedId, onSelect, onDelete }: UploadLogProps) 
             {uploads.map(upload => (
               <tr
                 key={upload.id}
-                className={upload.id === selectedId ? 'selected' : undefined}
+                className={upload.id === selectedId ? 'ck-sel' : undefined}
                 onClick={() => onSelect(upload)}
                 tabIndex={0}
                 onKeyDown={e => {
@@ -64,10 +62,10 @@ function UploadLog({ uploads, selectedId, onSelect, onDelete }: UploadLogProps) 
                 <td className="upload-file">{upload.fileName || '–'}</td>
                 <td>{formatPeriod(upload)}</td>
                 <td>{formatDateTime(upload.uploadedAt)}</td>
-                <td className="numeric">{upload.players}</td>
-                <td className="numeric">{formatChips(upload.bruttoRake)}</td>
-                <td className={`numeric ${profitClass(upload.clubNet)}`}>{signed(upload.clubNet)}</td>
-                <td className="numeric upload-actions" onClick={e => e.stopPropagation()}>
+                <td className="num">{upload.players}</td>
+                <td className="num">{formatChips(upload.bruttoRake)}</td>
+                <td className={`num ${upload.clubNet < 0 ? 'ck-neg' : ''}`}>{formatChips(upload.clubNet)}</td>
+                <td className="num upload-actions" onClick={e => e.stopPropagation()}>
                   {confirmId === upload.id ? (
                     <>
                       <button

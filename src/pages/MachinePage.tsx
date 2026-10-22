@@ -8,6 +8,7 @@ import { readExcelFile, isZipFile, extractExcelFromZip,extractMemberStatistics, 
 import type { MemberStatistic } from '../utils/excelUtils'
 import { fetchPlayerSheet, findRbSetting } from '../utils/playerNames'
 import type { PlayerSheetData } from '../utils/playerNames'
+import { extractExportDetail } from '../utils/exportDetail'
 import { savePeriod } from '../utils/statsApi'
 import { KNOWN_AGENTS, OWNER_RAKEBACK, isDefaultOwner } from '../types'
 import type { AgentInput, AgentRow, NicknameWithLine } from '../types'
@@ -235,7 +236,7 @@ function MachinePage() {
         setStatsStatus({ kind: 'error', message: 'Statistics were not updated: could not find "Period" at the top of the "Member Statistics" sheet.' })
       } else {
         try {
-          await savePeriod(period, result.summary, file?.name ?? '')
+          await savePeriod(period, result.summary, extractExportDetail(workbook), file?.name ?? '')
           const range = period.start === period.end ? period.start : `${period.start} – ${period.end}`
           setStatsStatus({ kind: 'saved', message: `Statistics updated for ${range}.` })
         } catch (error) {

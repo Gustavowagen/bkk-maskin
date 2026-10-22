@@ -8,14 +8,16 @@ interface StatTileProps {
   value: string;
   delta?: StatDelta;
   hint?: string;
+  tone?: number; // Colours the value green when positive and red when negative
+  small?: boolean; // Smaller value, for text such as a tournament title
 }
 
-const StatTile = ({ label, value, delta, hint }: StatTileProps) => (
-  <div className="stat-tile">
-    <span className="stat-tile-label">{label}</span>
-    <span className="stat-tile-value">{value}</span>
-    {delta && <span className={`stat-tile-delta ${delta.good ? 'stat-positive' : 'stat-negative'}`}>{delta.text}</span>}
-    {hint && <span className="stat-tile-hint">{hint}</span>}
+const StatTile = ({ label, value, delta, hint, tone, small }: StatTileProps) => (
+  <div className="ck-kpi">
+    <span className="ck-kpi-label">{label}</span>
+    <span className={`ck-kpi-value${small ? ' small' : ''}${tone ? (tone > 0 ? ' ck-pos' : ' ck-neg') : ''}`}>{value}</span>
+    {delta && <span className={`ck-kpi-delta ${delta.good ? 'ck-pos' : 'ck-neg'}`}>{delta.text}</span>}
+    {hint && <span className="ck-kpi-hint">{hint}</span>}
   </div>
 )
 
