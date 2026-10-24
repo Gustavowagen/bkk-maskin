@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import '../App.css'
 import FileUpload from '../components/FileUpload'
+import GmailImport from '../components/GmailImport'
 import NicknameInput from '../components/NicknameInput'
 import SpreadsheetView from '../components/SpreadsheetView'
 import { readExcelFile, isZipFile, extractExcelFromZip,extractMemberStatistics, isActiveMember, findAgentMembers, findPlayersMissingFromBalance, filterWorkbookByNicknames, downloadExcelFile, buildSheetPreview, extractPeriod } from '../utils/excelUtils'
@@ -269,6 +270,8 @@ function MachinePage() {
           label="Choose Context File"
           id="context-file"
         />
+
+        <GmailImport onFileUpload={handleFileUpload} />
 
         {isLoadingPlayers && (
           <div className="players-loading" role="status" aria-live="polite">
