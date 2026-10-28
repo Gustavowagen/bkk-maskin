@@ -42,6 +42,7 @@ export const KNOWN_AGENTS: Omit<AgentInput, 'previousBalance'>[] = [
   { name: 'JuniorBedell', rakeShare: 50 },
   { name: 'AndreasBanderas', rakeShare: 50 },
   { name: 'DegenHustlerrr', rakeShare: 50, ownRakeShare: 0, playerRakeShares: [{ nickname: 'Bleiduglad', rakeShare: 75 }] },
+  { name: 'CagnusM@rlsen', rakeShare: 50 },
 ];
 
 /** The agent's rake %, with the exceptions for his own play and single players (e.g. "50%, own 0%, Bleiduglad 75%") */
