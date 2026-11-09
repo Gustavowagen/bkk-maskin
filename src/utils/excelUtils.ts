@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import { rakeShareLabel } from '../types';
 import type { AgentInput, NicknameWithLine, OwnerAccountGroup } from '../types';
-import { OWNER_ACCOUNT_GROUPS } from '../types';
+import { OWNER_ACCOUNT_GROUPS, ownerRakeShare } from '../types';
 import { findRealName } from './playerNames';
 
 /**
@@ -457,7 +457,8 @@ export const findPlayersMissingFromBalance = (
  * - Adds "Rakeback" column (rake * rakeback %)
  * - Adds "Profit/Loss" column (chips - line if line exists, otherwise just chips, plus rakeback)
  * - Owners are left out of the main table and put in an owners table to the right of it
- *   ("Rake share" = Netto Rake / number of owners, "Rb+rake" = Rake + Rake share, "Ny Saldo" = Profit/Loss + Rake share).
+ *   ("Rake share" = Netto Rake * the owner's % in OWNER_RAKE_SHARES, "Rb+rake" = Rake + Rake share,
+ *   "Ny Saldo" = Profit/Loss + Rake share).
  *   An owner with several accounts (OWNER_ACCOUNT_GROUPS) counts as one owner: his rake share is split between
  *   his accounts, and a total row (Rake, Profit/Loss, Rake share, Rb+rake) is added below them.
  * - Agents and players whose agent (in "Member Statistics") is one of the entered agents are left out
@@ -743,19 +744,20 @@ export const filterWorkbookByNicknames = (
 
   const nettoRake = bruttoRake - totalRakeback - extraExpenses - totalAgentRakeback;
 
-  // Owners table to the right of the main table: the netto rake is split evenly between the owners,
+  // Owners table to the right of the main table: each owner gets his fixed % of the netto rake,
   // where an owner with several accounts counts once and his share is split between his accounts
   const accountsByGroup = new Map<OwnerAccountGroup, unknown[][]>();
   ownerData.forEach(row => {
     const group = ownerRowGroups.get(row);
     if (group) accountsByGroup.set(group, [...(accountsByGroup.get(group) ?? []), row]);
   });
-  const ownerCount = ownerData.length - ownerRowGroups.size + accountsByGroup.size;
-  const rakeShare = ownerCount > 0 ? round2(nettoRake / ownerCount) : 0;
+  const rakeShareOf = (name: string) => round2(nettoRake * ownerRakeShare(name) / 100);
   const ownerRakeIndex = 4;
   ownerData.forEach(row => {
     const group = ownerRowGroups.get(row);
-    const accountRakeShare = group ? round2(rakeShare / accountsByGroup.get(group)!.length) : rakeShare;
+    const accountRakeShare = group
+      ? round2(rakeShareOf(group.name) / accountsByGroup.get(group)!.length)
+      : rakeShareOf(String(row[0]));
     row[6] = accountRakeShare;
     // Owners get all of their own rake back, on top of their share of the netto rake
     row[7] = round2(Number(row[ownerRakeIndex]) + accountRakeShare);
@@ -777,7 +779,7 @@ export const filterWorkbookByNicknames = (
     ownerTableRows.push(...accounts);
     if (accounts.length > 1) {
       const sum = (index: number) => round2(accounts.reduce((total, account) => total + Number(account[index]), 0));
-      ownerTableRows.push([group.name, '', '', '', sum(ownerRakeIndex), sum(ownerProfitLossIndex), rakeShare, sum(7), '', '', '', '', '']);
+      ownerTableRows.push([group.name, '', '', '', sum(ownerRakeIndex), sum(ownerProfitLossIndex), rakeShareOf(group.name), sum(7), '', '', '', '', '']);
     }
   });
   placeTable([OWNERS_TABLE_HEADERS, ...ownerTableRows], OWNERS_TABLE_COLUMN_INDEX);

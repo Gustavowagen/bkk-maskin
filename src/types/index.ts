@@ -9,10 +9,25 @@ export interface NicknameWithLine {
 export const OWNER_RAKEBACK = 100;
 
 // Players that are marked as owners by default when a file is uploaded (matched case-insensitively)
-export const DEFAULT_OWNERS = ['Finnfettfinger', 'sick1sa', 'Dannern', 'Kejila', 'Guccibike', 'shush22', 'Snowie'];
+export const DEFAULT_OWNERS = ['Finnfettfinger', 'MisterrrP', 'Dannern', 'Kejila', 'Guccibike', 'shush22', 'Snowie'];
 
 export const isDefaultOwner = (nickname: string): boolean =>
   DEFAULT_OWNERS.some(owner => owner.toLowerCase() === nickname.trim().toLowerCase());
+
+/**
+ * Each owner's share of the netto rake in percent, keyed by nickname, or by the group name for an owner
+ * with several accounts (matched case-insensitively). Owners not listed here get no rake share.
+ */
+export const OWNER_RAKE_SHARES: Record<string, number> = {
+  Finnfettfinger: 30,
+  MisterrrP: 10,
+  Dannern: 20,
+  'Kejila + GucciBike': 20,
+  'shush22 + Snowie': 20,
+};
+
+export const ownerRakeShare = (name: string): number =>
+  Object.entries(OWNER_RAKE_SHARES).find(([owner]) => owner.toLowerCase() === name.trim().toLowerCase())?.[1] ?? 0;
 
 /**
  * Owners that play on more than one account (matched case-insensitively). They count as one owner when
